@@ -58,6 +58,9 @@ def get_del_lines(ord_nr):
     for row in rows:
         results.append(dict(zip(columns, row)))
 
+    for result in results:
+        result['LastUpdatedOn'] = result['LastUpdatedOn'].strftime('%Y-%m-%d')
+
     cursor.close()
     cnxn.close()
     return results
@@ -141,6 +144,16 @@ def assembly_del_lines_with_scan(del_lines, old_del_lines):
     old_del_lines = [line for i, line in enumerate(old_del_lines) if i not in index_to_be_del]
 
     return(import_del_lines)
+
+def del_old_lines(old_lines):
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+
+    for line in old_lines:
+        cursor.execute("EXEC IP_del_DeliveryLine ?, ?, ?, ?, ?, ?, ?", (line['DossierCode'], line['DetailCode'], line['DetailSubCode'], line['DelLineLineNr'], 1240000, line['LastUpdatedOn'], 'ISAH'))
+
+    cursor.close()
+    cnxn.close()
 
 if __name__ == '__main__':
     app.run()
