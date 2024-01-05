@@ -10,8 +10,11 @@ def get_db_connection():
     database = 'Test_LegendFleet'
     username = 'IsahIsah'
     password = 'isahisah'
-    cnxn = pyodbc.connect('DRIVER={ODBC Driver 17 for SQL Server};SERVER=' +
-                          server+';DATABASE='+database+';UID='+username+';PWD=' + password)
+
+    # Adjust the driver name according to the version installed on your system
+    driver_name = 'SQL Server Native Client 11.0'  # Replace with the actual driver name
+
+    cnxn = pyodbc.connect(f'DRIVER={{{driver_name}}};SERVER={server};DATABASE={database};UID={username};PWD={password}')
     return cnxn
 
 @app.route('/')
