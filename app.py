@@ -6,7 +6,7 @@ app = Flask(__name__)
 CORS(app)
 
 def get_db_connection():
-    server = 'LR-SQL01\\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
+    server = 'LR-SQL01\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
     database = 'Test_LegendFleet'
     username = 'IsahIsah'
     password = 'isahisah'
@@ -41,7 +41,11 @@ def handle_post():
 
         import_del_lines = assembly_del_lines_with_scan(del_lines, old_del_lines)
 
-        return (import_del_lines)
+        # del_old_lines(old_del_lines)
+        create_new_lines(import_del_lines)
+
+        # return ("Scans where imported.")
+        return (import_del_lines[0]["LastUpdatedOn"])
     else:
         return jsonify({"error": "Request must be JSON"}), 400
 
@@ -49,17 +53,22 @@ def handle_post():
 def get_del_lines(ord_nr):
     cnxn = get_db_connection()
     cursor = cnxn.cursor()
-    cursor.execute("EXEC SIP_sel_LEG_StockMovements ?", (ord_nr,))  # Replace 'your_table' with your actual table name
+    cursor.execute("EXEC SIP_sel_LEG_StockMovements ?", (ord_nr,))
     rows = cursor.fetchall()
     
     # Convert query result to list of dictionaries
     columns = [column[0] for column in cursor.description]
     results = []
     for row in rows:
-        results.append(dict(zip(columns, row)))
+        row_dict = dict(zip(columns, row))
 
-    for result in results:
-        result['LastUpdatedOn'] = result['LastUpdatedOn'].strftime('%Y-%m-%d')
+        # Strip whitespace from string values and format date values
+        for key, value in row_dict.items():
+            if isinstance(value, str):
+                # Strip whitespace from string values
+                row_dict[key] = value.strip()
+
+        results.append(row_dict)
 
     cursor.close()
     cnxn.close()
@@ -92,11 +101,8 @@ def verify_v1(del_lines):
     for line in del_lines:
         if not line['lotNr'].startswith("LF?]") :
             line['certificate'] = line['lotNr']
-            line['lotNr'] = "N''"
-            if line['certificate'] == '':
-                line['certificate'] = "N''"
         else:
-            line['certificate'] = "N''"
+            line['certificate'] = ""
         new_del_lines.append(line)
     return new_del_lines
 
@@ -135,6 +141,7 @@ def assembly_del_lines_with_scan(del_lines, old_del_lines):
                 import_del_line["Tobedelqty"] = int(del_lines[del_line_index]["Qty"])
                 import_del_line["certificate"] = del_lines[del_line_index]["certificate"]
                 import_del_line["lotNr"] = del_lines[del_line_index]["lotNr"]
+                import_del_line["DelLineLineNr"] = None
                 del del_lines[del_line_index]
                 import_del_lines.append(import_del_line)
             else:
@@ -152,6 +159,168 @@ def del_old_lines(old_lines):
     for line in old_lines:
         cursor.execute("EXEC IP_del_DeliveryLine ?, ?, ?, ?, ?, ?, ?", (line['DossierCode'], line['DetailCode'], line['DetailSubCode'], line['DelLineLineNr'], 1240000, line['LastUpdatedOn'], 'ISAH'))
 
+    cursor.close()
+    cnxn.close()
+
+def create_new_lines(import_lines):
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    for line in import_lines:
+        if line['DelLineLineNr'] is not None:
+            if line["LastUpdatedOn"] is not None:
+                line["LastUpdatedOn"] = line["LastUpdatedOn"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["PlanDelDate"] is not None:
+                line["PlanDelDate"] = line["PlanDelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["DelDate"] is not None:
+                line["DelDate"] = line["DelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["ConfDelDate"] is not None:
+                line["ConfDelDate"] = line["ConfDelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["InvtCreDate"] is not None:
+                line["InvtCreDate"] = line["InvtCreDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["ToBeDelInvtCreDate"] is not None:
+                line["ToBeDelInvtCreDate"] = line["ToBeDelInvtCreDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["ToBeDelCompletedDosDetDate"] is not None:
+                line["ToBeDelCompletedDosDetDate"] = line["ToBeDelCompletedDosDetDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["CredLimitExceedsDate"] is not None:
+                line["CredLimitExceedsDate"] = line["CredLimitExceedsDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            cursor.execute("EXEC IP_upd_DeliveryLine ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", (
+                    line['DossierCode'],
+                    line['DetailCode'],
+                    line['DetailSubCode'],
+                    line['DelLineLineNr'],
+                    line["LastUpdatedOn"],
+                    line['DelMainCode'],
+                    line['CustId'],
+                    line['DelAddrCode'],
+                    line['ShipAgentCode'],
+                    line["UserCode"],
+                    line["Remark"],
+                    line["Qty"],
+                    line["PurQty"],
+                    line["InvtQty"],
+                    line["ProdQty"],
+                    line["Qty"],
+                    line["ToBeDelPurQty"],
+                    line["Qty"],
+                    line["ToBeDelProdQty"],
+                    line["DelQty"],
+                    line["DelPurQty"],
+                    line["DelInvtQty"],
+                    line["DelProdQty"],
+                    line["PlanDelDate"],
+                    line["DelDate"],
+                    line["ConfDelDate"],
+                    line["DelCompletedDate"],
+                    line["DelCompletedInd"],
+                    line["Info"],
+                    line["WarehouseCode"],
+                    line["LocationCode"],
+                    line["lotNr"],
+                    line["certificate"],
+                    '',
+                    '',
+                    '',
+                    '',
+                    line["InventoryStatusCode"],
+                    line["ToBeDelInventoryStatusCode"],
+                    line["InvtCreDate"],
+                    line["ToBeDelInvtCreDate"],
+                    line["ToBeDelCompletedDosDetDate"],
+                    line["ToBeDelCompletedDosDetInd"],
+                    line["ConfDelDateDefInd"],
+                    line["PlanDelDateDefInd"],
+                    line["DelAddrCodeDefInd"],
+                    line["CredLimitExceedsInd"],
+                    line["CredLimitExceedsDate"],
+                    line["CredLimitCheckInd"],
+                    line["AutoCreShipDocInd"],
+                    line["DelAddrType"],
+                    line["DelFiatInd"],
+                    line["ServObjectCode"],
+                    line["TargetServObjectCode"],
+                    line["ReplacedABSLineNr"],
+                    line["MultiLevelReplacementInd"],
+                    line["LocationServObjectCode"],
+                    line["MemoGrpId"],
+                    1240000,
+                    None,
+                    'ISAH' 
+            ))
+        else:
+            if line["LastUpdatedOn"] is not None:
+                line["LastUpdatedOn"] = line["LastUpdatedOn"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["PlanDelDate"] is not None:
+                line["PlanDelDate"] = line["PlanDelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["DelDate"] is not None:
+                line["DelDate"] = line["DelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["ConfDelDate"] is not None:
+                line["ConfDelDate"] = line["ConfDelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["InvtCreDate"] is not None:
+                line["InvtCreDate"] = line["InvtCreDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["ToBeDelInvtCreDate"] is not None:
+                line["ToBeDelInvtCreDate"] = line["ToBeDelInvtCreDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["ToBeDelCompletedDosDetDate"] is not None:
+                line["ToBeDelCompletedDosDetDate"] = line["ToBeDelCompletedDosDetDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["CredLimitExceedsDate"] is not None:
+                line["CredLimitExceedsDate"] = line["CredLimitExceedsDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if line["DelCompletedDate"] is not None:
+                line["DelCompletedDate"] = line["DelCompletedDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            
+            cursor.execute("DECLARE @new_DelLineLineNr T_LineNr EXEC IP_ins_DeliveryLine ?, ?, ?, @new_DelLineLineNr OUTPUT, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", (
+                    line['DossierCode'],
+                    line['DetailCode'],
+                    line['DetailSubCode'],
+                    line['DelMainCode'],
+                    line['CustId'],
+                    line['DelAddrCode'],
+                    line['ShipAgentCode'],
+                    line["UserCode"],
+                    line["Remark"],
+                    line["Qty"],
+                    line["PurQty"],
+                    line["InvtQty"],
+                    line["ProdQty"],
+                    line["Qty"],
+                    line["ToBeDelPurQty"],
+                    line["Qty"],
+                    line["ToBeDelProdQty"],
+                    line["DelQty"],
+                    line["DelPurQty"],
+                    line["DelInvtQty"],
+                    line["DelProdQty"],
+                    line["PlanDelDate"],
+                    line["DelDate"],
+                    line["ConfDelDate"],
+                    line["DelCompletedDate"],
+                    line["DelCompletedInd"],
+                    line["Info"],
+                    line["WarehouseCode"],
+                    line["LocationCode"],
+                    line["lotNr"],
+                    line["certificate"],
+                    line["InventoryStatusCode"],
+                    line["InvtCreDate"],
+                    line["ToBeDelCompletedDosDetInd"],
+                    line["ToBeDelCompletedDosDetDate"],
+                    line["PlanDelDateDefInd"],
+                    line["ConfDelDateDefInd"],
+                    line["DelAddrCodeDefInd"],
+                    line["CredLimitExceedsInd"],
+                    line["CredLimitExceedsDate"],
+                    line["AutoCreShipDocInd"],
+                    line["CredLimitCheckInd"],
+                    line["DelAddrType"],
+                    line["DelFiatInd"],
+                    line["ServObjectCode"],
+                    line["TargetServObjectCode"],
+                    line["ReplacedABSLineNr"],
+                    line["MultiLevelReplacementInd"],
+                    1240000,
+                    line["LastUpdatedOn"],
+                    'ISAH',
+                    line["LocationServObjectCode"],
+                    line["MemoGrpId"] 
+                ))
     cursor.close()
     cnxn.close()
 
