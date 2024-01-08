@@ -47,8 +47,8 @@ def handle_post():
         # del_old_lines(old_del_lines)
         create_new_lines(import_del_lines)
 
-        # return ("Scans where imported.")
-        return (import_del_lines[0]["LastUpdatedOn"])
+        return ("Scans where imported.")
+        # return (import_del_lines[0])
     else:
         return jsonify({"error": "Request must be JSON"}), 400
 
@@ -56,7 +56,7 @@ def handle_post():
 def get_del_lines(ord_nr):
     cnxn = get_db_connection()
     cursor = cnxn.cursor()
-    cursor.execute("EXEC SIP_sel_LEG_StockMovements ?", (ord_nr,))
+    cursor.execute("EXEC SIP_sel_LEG_StockMovements ?", (ord_nr))
     rows = cursor.fetchall()
     
     # Convert query result to list of dictionaries
@@ -102,12 +102,14 @@ def work_data(result):
 def verify_v1(del_lines):
     new_del_lines = []
     for line in del_lines:
+        line['PartCode'] = line['partCode']
+        line['Qty'] = line['qty']
         if not line['lotNr'].startswith("LF?]") :
             line['certificate'] = line['lotNr']
         else:
             line['certificate'] = ""
         new_del_lines.append(line)
-    return new_del_lines
+    return (new_del_lines)
 
 def assembly_del_lines_with_scan(del_lines, old_del_lines):
     import_del_lines = []
@@ -168,6 +170,10 @@ def del_old_lines(old_lines):
 def create_new_lines(import_lines):
     cnxn = get_db_connection()
     cursor = cnxn.cursor()
+    # for line in import_lines:
+    #     for value in line.values():
+    #         if value == "":
+    #             value = "N''"
     for line in import_lines:
         if line['DelLineLineNr'] is not None:
             if line["LastUpdatedOn"] is not None:
@@ -249,6 +255,7 @@ def create_new_lines(import_lines):
                     None,
                     'ISAH' 
             ))
+            cnxn.commit()
         else:
             if line["LastUpdatedOn"] is not None:
                 line["LastUpdatedOn"] = line["LastUpdatedOn"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
@@ -324,6 +331,7 @@ def create_new_lines(import_lines):
                     line["LocationServObjectCode"],
                     line["MemoGrpId"] 
                 ))
+            cnxn.commit()
     cursor.close()
     cnxn.close()
 
