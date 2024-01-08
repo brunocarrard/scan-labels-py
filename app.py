@@ -7,7 +7,7 @@ CORS(app)
 
 def get_db_connection():
     server = 'LR-SQL01\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
-    database = 'Test_LegendFleet'
+    database = 'Homologation_Legend_Fleet'
     username = 'IsahIsah'
     password = 'isahisah'
 
