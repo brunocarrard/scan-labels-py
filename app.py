@@ -48,6 +48,7 @@ def handle_post():
         create_new_lines(import_del_lines)
 
         return ("Scans where imported.")
+        
         # return (import_del_lines[0])
     else:
         return jsonify({"error": "Request must be JSON"}), 400
@@ -106,6 +107,7 @@ def verify_v1(del_lines):
         line['Qty'] = line['qty']
         if not line['lotNr'].startswith("LF?]") :
             line['certificate'] = line['lotNr']
+            line['lotNr'] = ""
         else:
             line['certificate'] = ""
         new_del_lines.append(line)
@@ -155,6 +157,11 @@ def assembly_del_lines_with_scan(del_lines, old_del_lines):
 
     old_del_lines = [line for i, line in enumerate(old_del_lines) if i not in index_to_be_del]
 
+    if any(d.get("DelLineLineNr") is not None for d in import_del_lines):
+        for index, line in old_del_lines:
+            import_del_lines[index]["DelLineLineNr"] = line["DelLineLineNr"]
+            import_del_lines[index]["LastUpdatedOn"] = line["LastUpdatedOn"]
+
     return(import_del_lines)
 
 def del_old_lines(old_lines):
@@ -192,6 +199,7 @@ def create_new_lines(import_lines):
                 line["ToBeDelCompletedDosDetDate"] = line["ToBeDelCompletedDosDetDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             if line["CredLimitExceedsDate"] is not None:
                 line["CredLimitExceedsDate"] = line["CredLimitExceedsDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            print(line)
             cursor.execute("EXEC IP_upd_DeliveryLine ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", (
                     line['DossierCode'],
                     line['DetailCode'],
@@ -208,11 +216,11 @@ def create_new_lines(import_lines):
                     line["PurQty"],
                     line["InvtQty"],
                     line["ProdQty"],
-                    line["Qty"],
+                    line["ToBeDelQty"],
                     line["ToBeDelPurQty"],
-                    line["Qty"],
+                    line["ToBeDelInvtQty"],
                     line["ToBeDelProdQty"],
-                    line["DelQty"],
+                    line["Qty"],
                     line["DelPurQty"],
                     line["DelInvtQty"],
                     line["DelProdQty"],
@@ -244,7 +252,7 @@ def create_new_lines(import_lines):
                     line["CredLimitCheckInd"],
                     line["AutoCreShipDocInd"],
                     line["DelAddrType"],
-                    line["DelFiatInd"],
+                    True,
                     line["ServObjectCode"],
                     line["TargetServObjectCode"],
                     line["ReplacedABSLineNr"],
@@ -290,11 +298,11 @@ def create_new_lines(import_lines):
                     line["PurQty"],
                     line["InvtQty"],
                     line["ProdQty"],
-                    line["Qty"],
+                    line["ToBeDelQty"],
                     line["ToBeDelPurQty"],
-                    line["Qty"],
+                    line["ToBeDelInvtQty"],
                     line["ToBeDelProdQty"],
-                    line["DelQty"],
+                    line["Qty"],
                     line["DelPurQty"],
                     line["DelInvtQty"],
                     line["DelProdQty"],
@@ -320,7 +328,7 @@ def create_new_lines(import_lines):
                     line["AutoCreShipDocInd"],
                     line["CredLimitCheckInd"],
                     line["DelAddrType"],
-                    line["DelFiatInd"],
+                    True,
                     line["ServObjectCode"],
                     line["TargetServObjectCode"],
                     line["ReplacedABSLineNr"],
