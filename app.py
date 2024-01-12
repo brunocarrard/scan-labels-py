@@ -1,13 +1,14 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+import datetime
 import pyodbc
 
 app = Flask(__name__)
 CORS(app)
 
 def get_db_connection():
-    server = 'LR-SQL01\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
-    database = 'Test_LegendFleet'
+    server = '192.168.0.121\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
+    database = 'Homologation_Legend_Fleet'
     username = 'IsahIsah'
     password = 'isahisah'
 
@@ -122,6 +123,14 @@ def assembly_del_lines_with_scan(del_lines, old_del_lines):
     del_lines = [{"PartCode": key[0], "lotNr": key[1], "certificate": key[2], "Qty": qty} for key, qty in sum_dict.items()]
     # set initial import_lines
     import_del_lines = old_del_lines.copy()
+    # remove from import_lines lines Parts that where not scanned
+    for index, import_line in enumerate(import_del_lines):
+        delete = True
+        for del_line in del_lines:
+            if import_line["PartCode"] == del_line["PartCode"]:
+                delete = False
+        if delete:
+            del import_del_lines[index]
     # produce update import_lines
     for import_line in import_del_lines:
         necessity = int(import_line["Qty"]) - int(import_line["DelQty"])
@@ -132,12 +141,12 @@ def assembly_del_lines_with_scan(del_lines, old_del_lines):
                     line['certificate'] == import_line["CertificateCode"] and
                     line["lotNr"] == import_line["LotNr"]):
                     if int(line["Qty"]) <= necessity:
-                        import_line["DelQty"] = int(import_line["DelQty"]) + line["Qty"]
+                        import_line["ToBeDelQty"] = int(import_line["ToBeDelQty"]) + line["Qty"]
                         necessity = necessity - int(line["Qty"])
                         del del_lines[index]
                         break
                     else:
-                        import_line["DelQty"] = int(import_line["DelQty"]) + necessity
+                        import_line["ToBeDelQty"] = int(import_line["DelQty"]) + necessity
                         line["Qty"] = int(line["Qty"]) - necessity
                         necessity = 0
                         break
@@ -161,6 +170,7 @@ def assembly_del_lines_with_scan(del_lines, old_del_lines):
                 line["PurQty"] = 0
                 line["InvtQty"] = 0
                 line["ProdQty"] = 0
+                line["DelQty"] = 0
                 line["ToBeDelQty"] = 0
                 line["ToBeDelPurQty"] = 0
                 line["ToBeDelInvtQty"] = 0
@@ -176,7 +186,7 @@ def assembly_del_lines_with_scan(del_lines, old_del_lines):
                 line["LocationServObjectCode"] = import_line["LocationServObjectCode"]
                 line['DelLineLineNr'] = None
                 break
-        line["DelQty"] = line["Qty"]
+        line["ToBeDelQty"] = line["Qty"]
         import_del_lines.append(line)
     return(import_del_lines)
 
@@ -215,6 +225,7 @@ def create_new_lines(import_lines):
                 line["ToBeDelCompletedDosDetDate"] = line["ToBeDelCompletedDosDetDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             if line["CredLimitExceedsDate"] is not None:
                 line["CredLimitExceedsDate"] = line["CredLimitExceedsDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            # UPDATE EXISTING LINES
             cursor.execute("EXEC IP_upd_DeliveryLine ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", (
                     line['DossierCode'],
                     line['DetailCode'],
@@ -235,12 +246,12 @@ def create_new_lines(import_lines):
                     line["ToBeDelPurQty"],
                     line["ToBeDelInvtQty"],
                     line["ToBeDelProdQty"],
-                    line["Qty"],
+                    line["DelQty"],
                     line["DelPurQty"],
                     line["DelInvtQty"],
                     line["DelProdQty"],
                     line["PlanDelDate"],
-                    line["DelDate"],
+                    datetime.datetime.now(),
                     line["ConfDelDate"],
                     line["DelCompletedDate"],
                     line["DelCompletedInd"],
@@ -279,81 +290,96 @@ def create_new_lines(import_lines):
                     'ISAH' 
             ))
             cnxn.commit()
+            # AUTHORIZE
+            cursor.execute("DECLARE @InitLogDate T_DateTime, @ReturnCode tinyint, @DeliveryLinesProcessed int EXEC [IP_prc_DeliveryToShip] ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @InitLogDate OUTPUT, @ReturnCode OUTPUT, @DeliveryLinesProcessed OUTPUT", (
+                line['DossierCode'],
+                line['DetailCode'],
+                line['DetailSubCode'],
+                line['DelLineLineNr'],
+                datetime.datetime.now(),
+                0,
+                None,
+                None,
+                'ISAH',
+                1240000
+            ))
+            cnxn.commit()
         else:
-            # if line["LastUpdatedOn"] is not None:
-            #     line["LastUpdatedOn"] = line["LastUpdatedOn"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            # if line["PlanDelDate"] is not None:
-            #     line["PlanDelDate"] = line["PlanDelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            # if line["DelDate"] is not None:
-            #     line["DelDate"] = line["DelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            # if line["ConfDelDate"] is not None:
-            #     line["ConfDelDate"] = line["ConfDelDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            # if line["InvtCreDate"] is not None:
-            #     line["InvtCreDate"] = line["InvtCreDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            # if line["ToBeDelInvtCreDate"] is not None:
-            #     line["ToBeDelInvtCreDate"] = line["ToBeDelInvtCreDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            # if line["ToBeDelCompletedDosDetDate"] is not None:
-            #     line["ToBeDelCompletedDosDetDate"] = line["ToBeDelCompletedDosDetDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            # if line["CredLimitExceedsDate"] is not None:
-            #     line["CredLimitExceedsDate"] = line["CredLimitExceedsDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            # if line["DelCompletedDate"] is not None:
-            #     line["DelCompletedDate"] = line["DelCompletedDate"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            
-            cursor.execute("DECLARE @new_DelLineLineNr T_LineNr EXEC IP_ins_DeliveryLine ?, ?, ?, @new_DelLineLineNr OUTPUT, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", (
-                    line.get('DossierCode'),
-                    line.get('DetailCode'),
-                    line.get('DetailSubCode'),
-                    line.get('DelMainCode'),
-                    line.get('CustId'),
-                    line.get('DelAddrCode'),
-                    line.get('ShipAgentCode'),
-                    line.get("UserCode"),
-                    line.get("Remark"),
-                    line.get("Qty"),
-                    line.get("PurQty"),
-                    line.get("InvtQty"),
-                    line.get("ProdQty"),
-                    line.get("ToBeDelQty"),
-                    line.get("ToBeDelPurQty"),
-                    line.get("ToBeDelInvtQty"),
-                    line.get("ToBeDelProdQty"),
-                    line.get("Qty"),
-                    line.get("DelPurQty"),
-                    line.get("DelInvtQty"),
-                    line.get("DelProdQty"),
-                    line.get("PlanDelDate"),
-                    line.get("DelDate"),
-                    line.get("ConfDelDate"),
-                    line.get("DelCompletedDate"),
-                    line.get("DelCompletedInd"),
-                    line.get("Info"),
-                    line.get("WarehouseCode"),
-                    line.get("LocationCode"),
-                    line.get("lotNr"),
-                    line.get("certificate"),
-                    line.get("InventoryStatusCode"),
-                    line.get("InvtCreDate"),
-                    line.get("ToBeDelCompletedDosDetInd"),
-                    line.get("ToBeDelCompletedDosDetDate"),
-                    line.get("PlanDelDateDefInd"),
-                    line.get("ConfDelDateDefInd"),
-                    line.get("DelAddrCodeDefInd"),
-                    line.get("CredLimitExceedsInd"),
-                    line.get("CredLimitExceedsDate"),
-                    line.get("AutoCreShipDocInd"),
-                    line.get("CredLimitCheckInd"),
-                    line.get("DelAddrType"),
-                    True,
-                    line.get("ServObjectCode"),
-                    line.get("TargetServObjectCode"),
-                    line.get("ReplacedABSLineNr"),
-                    line.get("MultiLevelReplacementInd"),
-                    1240000,
-                    line.get("LastUpdatedOn"),
-                    'ISAH',
-                    line.get("LocationServObjectCode"),
-                    line.get("MemoGrpId") 
-                ))
+            # CREATE NEW LINES
+            new_DelLineLineNr = None
+            params = [
+                line.get('DossierCode'),
+                line.get('DetailCode'),
+                line.get('DetailSubCode'),
+                new_DelLineLineNr,
+                line.get('DelMainCode'),
+                line.get('CustId'),
+                line.get('DelAddrCode'),
+                line.get('ShipAgentCode'),
+                line.get("UserCode"),
+                line.get("Remark"),
+                line.get("Qty"),
+                line.get("PurQty"),
+                line.get("InvtQty"),
+                line.get("ProdQty"),
+                line.get("ToBeDelQty"),
+                line.get("ToBeDelPurQty"),
+                line.get("ToBeDelInvtQty"),
+                line.get("ToBeDelProdQty"),
+                line.get("DelQty"),
+                line.get("DelPurQty"),
+                line.get("DelInvtQty"),
+                line.get("DelProdQty"),
+                line.get("PlanDelDate"),
+                datetime.datetime.now(),
+                line.get("ConfDelDate"),
+                line.get("DelCompletedDate"),
+                line.get("DelCompletedInd"),
+                line.get("Info"),
+                line.get("WarehouseCode"),
+                line.get("LocationCode"),
+                line.get("lotNr"),
+                line.get("certificate"),
+                line.get("InventoryStatusCode"),
+                line.get("InvtCreDate"),
+                line.get("ToBeDelCompletedDosDetInd"),
+                line.get("ToBeDelCompletedDosDetDate"),
+                line.get("PlanDelDateDefInd"),
+                line.get("ConfDelDateDefInd"),
+                line.get("DelAddrCodeDefInd"),
+                line.get("CredLimitExceedsInd"),
+                line.get("CredLimitExceedsDate"),
+                line.get("AutoCreShipDocInd"),
+                line.get("CredLimitCheckInd"),
+                line.get("DelAddrType"),
+                True,
+                line.get("ServObjectCode"),
+                line.get("TargetServObjectCode"),
+                line.get("ReplacedABSLineNr"),
+                line.get("MultiLevelReplacementInd"),
+                1240000,
+                line.get("LastUpdatedOn"),
+                'ISAH',
+                line.get("LocationServObjectCode"),
+                line.get("MemoGrpId") 
+            ]
+            cursor.execute("EXEC IP_ins_DeliveryLine ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", params)
+            cnxn.commit()
+            new_DelLineLineNr = params[3]
+
+            # AUTHORIZE
+            cursor.execute("DECLARE @InitLogDate T_DateTime, @ReturnCode tinyint, @DeliveryLinesProcessed int EXEC [IP_prc_DeliveryToShip] ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @InitLogDate OUTPUT, @ReturnCode OUTPUT, @DeliveryLinesProcessed OUTPUT", (
+                line['DossierCode'],
+                line['DetailCode'],
+                line['DetailSubCode'],
+                new_DelLineLineNr,
+                datetime.datetime.now(),
+                0,
+                None,
+                None,
+                'ISAH',
+                1240000
+            ))
             cnxn.commit()
     cursor.close()
     cnxn.close()
