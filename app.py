@@ -1,13 +1,15 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 import datetime
 import pyodbc
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 CORS(app)
 
 def get_db_connection():
-    server = '192.168.0.121\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
+    server = 'LR-SQL01\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
     database = 'Homologation_Legend_Fleet'
     username = 'IsahIsah'
     password = 'isahisah'
@@ -30,6 +32,21 @@ def data():
     if len(results) == 0:
         return jsonify({"error": "Could not find Sales Order"}), 404
     results = work_data(results)
+
+    if len(results["parts"]) == 0:
+        return jsonify({"error": "Order is ready and authorized"}), 404
+
+    sub_parts = get_sub_parts(user_input)
+
+    results["parts"] = results["parts"] + sub_parts
+
+    certificates_lookup = get_available_certificates(user_input)
+
+    for part in results["parts"]:
+        part_code = part["PartCode"]
+        if part_code in certificates_lookup:
+            part["available_certificates"] = certificates_lookup[part_code]
+
     return jsonify(results)
 
 @app.route('/', methods=['POST'])
@@ -38,22 +55,86 @@ def handle_post():
         data = request.get_json()
         del_lines = data['delLines']
         del_lines = verify_v1(del_lines)
+        lotnr_result = verify_lotnr(del_line["lotNr"] for del_line in del_lines)
+        certificate_result = verify_certificate(del_line["certificate"] for del_line in del_lines)
+        if not lotnr_result["valid"]:
+            lotnrs = ", ".join(lotnr_result["invalid_results"])
+            return jsonify({"error": f"LotNr {lotnrs} does not exists"}), 400
+        if not certificate_result["valid"]:
+            certificates = ", ".join(certificate_result["invalid_results"])
+            return jsonify({"error": f"Certiicate {certificates} does not exists"}), 400
         old_del_lines = get_del_lines(data['ordNr'])
         
         for line in old_del_lines:
             line['PartCode'] = line['PartCode'].strip()
+        import_del_lines = assembly_del_lines_with_scan_sales_parts([line for line in del_lines if line['SubPartInd'] == 0], old_del_lines)
 
-        import_del_lines = assembly_del_lines_with_scan(del_lines, old_del_lines)
-
-        # del_old_lines(old_del_lines)
         create_new_lines(import_del_lines)
-
-        return ("Scans where imported.")
-        
-        # return (import_del_lines[0])
+        assembly_del_lines_with_scan_production_bom([line for line in del_lines if line['SubPartInd'] == 1], data['ordNr'])
+        # create_bom_del_lines([line for line in del_lines if line['SubPartInd'] == 1], data['ordNr'])
+        # update_bom_del_lines([line for line in del_lines if line['SubPartInd'] == 1], data['ordNr'])
+        authorize(import_del_lines)
+        return ("Scans were imported.")
     else:
         return jsonify({"error": "Request must be JSON"}), 400
+    
 
+def verify_lotnr(lot_nrs):
+    result = {
+        "valid": True,
+        "invalid_results": []
+    }
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    for lot_nr in lot_nrs:
+        cursor.execute("SELECT LotNr FROM T_LotNumber WHERE LotNr = ?", (lot_nr))
+        exists = cursor.fetchall()
+        if not exists:
+            result["invalid_results"].append(lot_nr)
+            result["valid"] = False
+    cursor.close()
+    cnxn.close()
+    return result
+
+def verify_certificate(certificates):
+    result = {
+        "valid": True,
+        "invalid_results": []
+    }
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    for certificate in certificates:
+        cursor.execute("SELECT CertificateCode FROM T_Certificate WHERE CertificateCode = ?", (certificate))
+        exists = cursor.fetchall()
+        if not exists:
+            result["invalid_results"].append(certificate)
+            result["valid"] = False
+    cursor.close()
+    cnxn.close()
+    return result
+
+def get_sub_parts(ord_nr):
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    cursor.execute("EXEC SIP_sel_LEG_StockMovementsBOM ?", (ord_nr))
+    rows = cursor.fetchall()
+
+    columns = [column[0] for column in cursor.description]
+    results = []
+    for row in rows:
+        row_dict = dict(zip(columns, row))
+
+        # Strip whitespace from string values and format date values
+        for key, value in row_dict.items():
+            if isinstance(value, str):
+                # Strip whitespace from string values
+                row_dict[key] = value.strip()
+
+        results.append(row_dict)
+
+    cursor.close()
+    cnxn.close()
+    return results
 
 def get_del_lines(ord_nr):
     cnxn = get_db_connection()
@@ -79,6 +160,49 @@ def get_del_lines(ord_nr):
     cnxn.close()
     return results
 
+def get_available_certificates(ord_nr):
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    cursor.execute("EXEC SIP_sel_LEG_AvailableCertificates ?", (ord_nr))
+    rows = cursor.fetchall()
+    
+    available_certificates = {}
+
+    for row in rows:
+        part_code = row[0]
+        provenance = row[1]
+        lot_nr = row[2]
+        certificate = row[3]
+        qty = row[4]
+
+        if int(provenance) == 3:
+            if part_code.strip() not in available_certificates:
+                available_certificates[part_code.strip()] = []
+            
+            if not certificate.strip() == "": available_certificates[part_code.strip()].append({"code": certificate.strip(), "qty": int(qty)})
+            if not lot_nr.strip() == "": available_certificates[part_code.strip()].append({"code": lot_nr.strip(),  "qty": int(qty)})
+    cursor.close()
+    cnxn.close()
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    cursor.execute("EXEC SIP_sel_LEG_ScannedCertificates ?", (ord_nr))
+    rows = cursor.fetchall()
+    for row in rows:
+        part_code = row[0]
+        qty = row[1]
+        certificate = row[2]
+        lot_nr = row[3]
+        found_certificate = next((obj for obj in available_certificates[part_code.strip()] if obj["code"] == lot_nr), None)
+        if found_certificate:
+            found_certificate["qty"] = int(found_certificate["qty"]) - int(qty)
+        else:
+            found_certificate = next((obj for obj in available_certificates[part_code.strip()] if obj["code"] == certificate), None)
+            if found_certificate:
+                found_certificate["qty"] = int(found_certificate["qty"]) - int(qty)
+    cursor.close()
+    cnxn.close()
+    return available_certificates
+
 def work_data(result):
     worked_data = {
         "ordNr": result[0]["OrdNr"],
@@ -89,7 +213,7 @@ def work_data(result):
 
     for item in result:
         part_code = item["PartCode"].strip()
-        qty = item["Qty"] - item["DelQty"]
+        qty = item["Qty"] - item["ToBeDelQty"] - item["DelQty"]
 
         if part_code not in grouped_by_part_code:
             grouped_by_part_code[part_code] = qty
@@ -98,6 +222,8 @@ def work_data(result):
 
     worked_data["parts"] = [{"PartCode": key, "Qty": value} for key, value in grouped_by_part_code.items()]
 
+    worked_data["parts"] = [item for item in worked_data["parts"] if item.get("Qty") is not None and item.get("Qty") > 0]
+
     return worked_data
 
 def verify_v1(del_lines):
@@ -105,16 +231,18 @@ def verify_v1(del_lines):
     for line in del_lines:
         line['PartCode'] = line['partCode']
         line['Qty'] = line['qty']
-        if not line['lotNr'].startswith("LF?]"):
+        if (line['lotNr'].startswith("LF") or line['lotNr'].startswith("LEG")):
             line['certificate'] = ""
-            line['certificate'] = line['lotNr']
-            line['lotNr'] = ""
         else:
-            line['certificate'] = ""
+            if (line['lotNr']) == "":
+                line['certificate'] = ""
+            else:
+                line['certificate'] = line['lotNr']
+            line['lotNr'] = ""
         new_del_lines.append(line)
     return (new_del_lines)
 
-def assembly_del_lines_with_scan(del_lines, old_del_lines):
+def assembly_del_lines_with_scan_sales_parts(del_lines, old_del_lines):
     # assembly similar del_lines
     sum_dict = {}
     for line in del_lines:
@@ -124,81 +252,86 @@ def assembly_del_lines_with_scan(del_lines, old_del_lines):
     # set initial import_lines
     import_del_lines = old_del_lines.copy()
     # remove from import_lines lines Parts that where not scanned
-    for index, import_line in enumerate(import_del_lines):
-        delete = True
-        for del_line in del_lines:
-            if import_line["PartCode"] == del_line["PartCode"]:
-                delete = False
-        if delete:
-            del import_del_lines[index]
+    part_codes_set = set(item.get("PartCode") for item in del_lines)
+    import_del_lines = [item for item in import_del_lines if item.get("PartCode") in part_codes_set]
+    # remove from import_lines lines Parts that where ready or authorized
+    import_del_lines = [item for item in import_del_lines if item.get("DelFiatInd") == 0]
+    import_del_lines = [item for item in import_del_lines if int(item.get("Qty")) - int(item.get("DelQty")) - int(item.get("ToBeDelQty")) > 0]
     # produce update import_lines
     for import_line in import_del_lines:
-        necessity = int(import_line["Qty"]) - int(import_line["DelQty"])
-        while necessity > 0:
-            initial_necessity = necessity
-            for index, line in enumerate(del_lines):
-                if (line["PartCode"] == import_line["PartCode"] and
-                    line['certificate'] == import_line["CertificateCode"] and
-                    line["lotNr"] == import_line["LotNr"]):
-                    if int(line["Qty"]) <= necessity:
-                        import_line["ToBeDelQty"] = int(import_line["ToBeDelQty"]) + line["Qty"]
-                        necessity = necessity - int(line["Qty"])
-                        del del_lines[index]
-                        break
-                    else:
-                        import_line["ToBeDelQty"] = int(import_line["DelQty"]) + necessity
-                        line["Qty"] = int(line["Qty"]) - necessity
-                        necessity = 0
-                        break
-            if initial_necessity == necessity:
-                break
+        for del_line in del_lines:
+            if import_line["PartCode"] == del_line["PartCode"] and import_line.get("Done", False) is not True:
+                import_line["ToBeDelQty"] = int(import_line["ToBeDelQty"]) + int(del_line["Qty"])
+                import_line["RemainingQty"] = int(import_line["Qty"]) - import_line["ToBeDelQty"]
+                import_line["Qty"] = import_line["ToBeDelQty"]
+                import_line["ToBeDelCertificateCode"] = del_line["certificate"]
+                import_line["ToBeDelLotNr"] = del_line["lotNr"]
+                import_line["Done"] = True
+                import_line["Authorize"] = True
+                del_line["Done"] = True
+                if int(import_line["InvtQty"]) > 0:
+                    import_line["InvtQty"] = import_line["Qty"]
+                if int(import_line["PurQty"]) > 0:
+                    import_line["PurQty"] = import_line["Qty"]
+                if int(import_line["ProdQty"]) > 0:
+                    import_line["ProdQty"] = import_line["Qty"]
+
     # produce insert import_lines
-    
-    for line in del_lines:
-        for import_line in import_del_lines:
-            if import_line["PartCode"] == line["PartCode"]:
-                line["DossierCode"] = import_line["DossierCode"]
-                line["DetailCode"] = import_line["DetailCode"]
-                line["DetailSubCode"] = import_line["DetailSubCode"]
-                line["DelAddrCode"] = import_line["DelAddrCode"]
-                line["ShipAgentCode"] = import_line["ShipAgentCode"]
-                line["Remark"] = import_line["Remark"]
-                line["WarehouseCode"] = import_line["WarehouseCode"]
-                line["LocationCode"] = import_line["LocationCode"]
-                line["InventoryStatusCode"] = import_line["InventoryStatusCode"]
-                line["UserCode"] = import_line["UserCode"]
-                line["PurQty"] = 0
-                line["InvtQty"] = 0
-                line["ProdQty"] = 0
-                line["DelQty"] = 0
-                line["ToBeDelQty"] = 0
-                line["ToBeDelPurQty"] = 0
-                line["ToBeDelInvtQty"] = 0
-                line["ToBeDelProdQty"] = 0
-                line["DelPurQty"] = 0
-                line["DelInvtQty"] = 0
-                line["DelProdQty"] = 0
-                line["PlanDelDate"] = import_line["PlanDelDate"]
-                line["ServObjectCode"] = import_line["ServObjectCode"]
-                line["TargetServObjectCode"] = import_line["TargetServObjectCode"]
-                line["ReplacedABSLineNr"] = import_line["ReplacedABSLineNr"]
-                line["MemoGrpId"] = import_line["MemoGrpId"]
-                line["LocationServObjectCode"] = import_line["LocationServObjectCode"]
-                line['DelLineLineNr'] = None
-                break
-        line["ToBeDelQty"] = line["Qty"]
-        import_del_lines.append(line)
+    for del_line in del_lines:
+        if del_line.get("Done", False) is not True:
+            for import_line in import_del_lines:
+                if del_line["PartCode"] == import_line["PartCode"] and import_line.get("Done", False) is True:
+                    new_line = import_line.copy()
+            new_line["PartCode"] = del_line["PartCode"]
+            new_line["Qty"] = del_line["Qty"]
+            new_line["ToBeDelQty"] = del_line["Qty"]
+            new_line["ToBeDelCertificateCode"] = del_line["certificate"]
+            new_line["ToBeDelLotNr"] = del_line["lotNr"]
+            new_line["RemainingQty"] = 0
+            new_line["DelQty"] = 0
+            new_line["ToBeDelPurQty"] = 0
+            new_line["ToBeDelInvtQty"] = 0
+            new_line["ToBeDelProdQty"] = 0
+            new_line["DesiredDelDate"] = datetime.datetime.now()
+            new_line["Authorize"] = True
+            new_line["DelLineLineNr"] = None
+            if new_line["InvtQty"] > 0:
+                new_line["InvtQty"] = del_line["Qty"]
+            if int(new_line["PurQty"]) > 0:
+                new_line["PurQty"] = del_line["Qty"]
+            if int(new_line["ProdQty"]) > 0:
+                new_line["ProdQty"] = del_line["Qty"]
+            for import_line in import_del_lines:
+                if import_line["PartCode"] == new_line["PartCode"] and import_line.get("RemainingQty", 0) > 0:
+                    import_line["RemainingQty"] = import_line["RemainingQty"] - int(new_line["Qty"])
+            import_del_lines.append(new_line)
+
+    # produce remaining import_lines
+    for import_line in import_del_lines:
+        if import_line.get("RemainingQty", 0) > 0:
+            new_line = import_line.copy()
+            new_line["Qty"] = import_line["RemainingQty"]
+            new_line["ToBeDelQty"] = 0
+            new_line["RemainingQty"] = 0
+            if int(new_line["InvtQty"]) > 0:
+                new_line["InvtQty"] = import_line["RemainingQty"]
+            if int(new_line["PurQty"]) > 0:
+                new_line["PurQty"] = import_line["RemainingQty"]
+            if int(new_line["ProdQty"]) > 0:
+                new_line["ProdQty"] = import_line["RemainingQty"]
+            new_line["DelQty"] = 0
+            new_line["ToBeDelPurQty"] = 0
+            new_line["ToBeDelInvtQty"] = 0
+            new_line["ToBeDelProdQty"] = 0
+            new_line["CertificateCode"] = ""
+            new_line["LotNr"] = ""
+            new_line["DesiredDelDate"] = ""
+            new_line["DelLineLineNr"] = None
+            new_line["Authorize"] = False
+            new_line["RemainingLine"] = True
+            import_del_lines.append(new_line)
+
     return(import_del_lines)
-
-def del_old_lines(old_lines):
-    cnxn = get_db_connection()
-    cursor = cnxn.cursor()
-
-    for line in old_lines:
-        cursor.execute("EXEC IP_del_DeliveryLine ?, ?, ?, ?, ?, ?, ?", (line['DossierCode'], line['DetailCode'], line['DetailSubCode'], line['DelLineLineNr'], 1240000, line['LastUpdatedOn'], 'ISAH'))
-
-    cursor.close()
-    cnxn.close()
 
 def create_new_lines(import_lines):
     cnxn = get_db_connection()
@@ -208,6 +341,10 @@ def create_new_lines(import_lines):
     #         if value == "":
     #             value = "N''"
     for line in import_lines:
+        if int(line['ProdQty']) > 0:
+            line["ToBeDelProdQty"] = line["Qty"]
+        else:
+            line["ToBeDelInvtQty"] = line["Qty"]
         if line['DelLineLineNr'] is not None:
             if line["LastUpdatedOn"] is not None:
                 line["LastUpdatedOn"] = line["LastUpdatedOn"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
@@ -262,8 +399,8 @@ def create_new_lines(import_lines):
                     line["CertificateCode"],
                     '',
                     '',
-                    '',
-                    '',
+                    line["ToBeDelLotNr"],
+                    line["ToBeDelCertificateCode"],
                     line["InventoryStatusCode"],
                     line["ToBeDelInventoryStatusCode"],
                     line["InvtCreDate"],
@@ -278,7 +415,7 @@ def create_new_lines(import_lines):
                     line["CredLimitCheckInd"],
                     line["AutoCreShipDocInd"],
                     line["DelAddrType"],
-                    True,
+                    0,
                     line["ServObjectCode"],
                     line["TargetServObjectCode"],
                     line["ReplacedABSLineNr"],
@@ -290,32 +427,19 @@ def create_new_lines(import_lines):
                     'ISAH' 
             ))
             cnxn.commit()
-            # AUTHORIZE
-            cursor.execute("DECLARE @InitLogDate T_DateTime, @ReturnCode tinyint, @DeliveryLinesProcessed int EXEC [IP_prc_DeliveryToShip] ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @InitLogDate OUTPUT, @ReturnCode OUTPUT, @DeliveryLinesProcessed OUTPUT", (
-                line['DossierCode'],
-                line['DetailCode'],
-                line['DetailSubCode'],
-                line['DelLineLineNr'],
-                datetime.datetime.now(),
-                0,
-                None,
-                None,
-                'ISAH',
-                1240000
-            ))
-            cnxn.commit()
         else:
             # CREATE NEW LINES
             new_DelLineLineNr = None
+            LastUpdated = None
+            # cursor.execute("")
             params = [
-                line.get('DossierCode'),
-                line.get('DetailCode'),
-                line.get('DetailSubCode'),
-                new_DelLineLineNr,
-                line.get('DelMainCode'),
-                line.get('CustId'),
-                line.get('DelAddrCode'),
-                line.get('ShipAgentCode'),
+                line.get("DossierCode"),
+                line.get("DetailCode"),
+                line.get("DetailSubCode"),
+                line.get("DelMainCode"),
+                line.get("CustId"),
+                line.get("DelAddrCode"),
+                line.get("ShipAgentCode"),
                 line.get("UserCode"),
                 line.get("Remark"),
                 line.get("Qty"),
@@ -331,15 +455,15 @@ def create_new_lines(import_lines):
                 line.get("DelInvtQty"),
                 line.get("DelProdQty"),
                 line.get("PlanDelDate"),
-                datetime.datetime.now(),
+                line.get("DesiredDelDate"),
                 line.get("ConfDelDate"),
                 line.get("DelCompletedDate"),
                 line.get("DelCompletedInd"),
                 line.get("Info"),
                 line.get("WarehouseCode"),
                 line.get("LocationCode"),
-                line.get("lotNr"),
-                line.get("certificate"),
+                line.get("LotNr"),
+                line.get("CertificateCode"),
                 line.get("InventoryStatusCode"),
                 line.get("InvtCreDate"),
                 line.get("ToBeDelCompletedDosDetInd"),
@@ -352,38 +476,99 @@ def create_new_lines(import_lines):
                 line.get("AutoCreShipDocInd"),
                 line.get("CredLimitCheckInd"),
                 line.get("DelAddrType"),
-                True,
+                0,
                 line.get("ServObjectCode"),
                 line.get("TargetServObjectCode"),
                 line.get("ReplacedABSLineNr"),
                 line.get("MultiLevelReplacementInd"),
                 1240000,
-                line.get("LastUpdatedOn"),
                 'ISAH',
                 line.get("LocationServObjectCode"),
                 line.get("MemoGrpId") 
             ]
-            cursor.execute("EXEC IP_ins_DeliveryLine ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", params)
+            cursor.execute("DECLARE @new_DelLineLineNr T_LineNr, @LastUpdatedOn nvarchar(30) EXEC IP_ins_DeliveryLine ?, ?, ?, @new_DelLineLineNr OUTPUT, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @LastUpdatedOn OUTPUT, ?, ?, ? SELECT @new_DelLineLineNr, @LastUpdatedOn", params)
+            new_DelLineLineNr = cursor.fetchone()[0]
             cnxn.commit()
-            new_DelLineLineNr = params[3]
+            line['DelLineLineNr'] = new_DelLineLineNr
+            line["LastUpdatedOn"] = LastUpdated
+            line['IsCreated'] = True
+    cursor.close()
+    cnxn.close()
+    update_created_lines(import_lines)
 
-            # AUTHORIZE
-            cursor.execute("DECLARE @InitLogDate T_DateTime, @ReturnCode tinyint, @DeliveryLinesProcessed int EXEC [IP_prc_DeliveryToShip] ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @InitLogDate OUTPUT, @ReturnCode OUTPUT, @DeliveryLinesProcessed OUTPUT", (
+def update_created_lines(import_lines):
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    for line in import_lines:
+        if line.get('IsCreated', False) is True and line.get("RemainingLine", False) is not True:
+            cursor.execute("UPDATE T_DeliveryLine SET ToBeDelCertificateCode = ?, ToBeDelLotNr = ? WHERE DossierCode = ? AND DetailCode = ? AND DetailSubCode = ? AND DelLineLineNr = ?", [
+                line["ToBeDelCertificateCode"],
+                line['ToBeDelLotNr'],
                 line['DossierCode'],
                 line['DetailCode'],
                 line['DetailSubCode'],
-                new_DelLineLineNr,
-                datetime.datetime.now(),
-                0,
-                None,
-                None,
-                'ISAH',
-                1240000
-            ))
+                line['DelLineLineNr']
+            ])
             cnxn.commit()
     cursor.close()
     cnxn.close()
 
-if __name__ == '__main__':
+def authorize(import_lines):
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    for line in import_lines:
+        if line["Authorize"] is not False:
+            cursor.execute("DECLARE @InitLogDate T_DateTime, @ReturnCode tinyint, @DeliveryLinesProcessed int EXEC [IP_prc_DeliveryToShip] ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @InitLogDate OUTPUT, @ReturnCode OUTPUT, @DeliveryLinesProcessed OUTPUT", (
+                    line['DossierCode'],
+                    line['DetailCode'],
+                    line['DetailSubCode'],
+                    line['DelLineLineNr'],
+                    datetime.datetime.now().strftime("%m/%d/%Y"),
+                    0,
+                    None,
+                    None,
+                    'ISAH',
+                    1240000
+                ))
+            cnxn.commit()
+    cursor.close()
+    cnxn.close()
+
+def assembly_del_lines_with_scan_production_bom(del_lines, ord_nr):
+    sum_dict = {}
+    for line in del_lines:
+        key = (line['PartCode'], line['lotNr'], line['certificate'])
+        sum_dict[key] = sum_dict.get(key, 0) + int(line['Qty'])
+    del_lines = [{"PartCode": key[0], "lotNr": key[1], "certificate": key[2], "Qty": qty} for key, qty in sum_dict.items()]
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    for line in del_lines:
+        cursor.execute("SIP_ins_LEG_PartDispatch ?, ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"], line["Qty"]))
+        cnxn.commit()
+    cursor.close()
+    cnxn.close()
+
+def create_bom_del_lines(del_lines, ord_nr):
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    for line in del_lines:
+        cursor.execute("SELECT PH.* FROM T_DossierMain DM INNER JOIN T_DossierDetail DL ON DM.DossierCode = DL.DossierCode INNER JOIN T_ProdBOMDeliveryLine BOM ON DL.DossierCode = BOM.DossierCode AND DL.DetailCode = BOM.DetailCode AND DL.DetailSubCode = BOM.DetailSubCode INNER JOIN T_ProdBillOfMat PH ON BOM.ProdBOMLineNr = PH.ProdBOMLineNr AND BOM.ProdHeaderDossierCode = PH.ProdHeaderDossierCode WHERE DM.OrdNr = ? AND DL.PartCode = ? and PH.SubPartCode = ?", (ord_nr, line["ParentPart"], line["PartCode"]))
+        exists = cursor.fetchall()
+        if not exists:
+            cursor.execute("SIP_ins_LEG_BOMDelLine ?, ?, ?, ?", (ord_nr, line["ParentPart"], line["PartCode"], line["Qty"]))
+            cnxn.commit()
+    cursor.close()
+    cnxn.close()
+
+def update_bom_del_lines(del_lines, ord_nr):
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    for line in del_lines:
+        cursor.execute("SIP_upd_LEG_BOMDelLine ?, ?, ?, ?, ?", (ord_nr, line["ParentPart"], line["PartCode"], line["certificate"], line["lotNr"]))
+        cnxn.commit()
+    cursor.close()
+    cnxn.close()
+
+if __name__ == '__main__':                                                                          
     app.run()
     
