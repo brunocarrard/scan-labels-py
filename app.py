@@ -2,15 +2,17 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 import datetime
+import logging
 import pyodbc
 
+logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 CORS(app)
 
 def get_db_connection():
     server = 'LR-SQL01\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
-    database = 'Homologation_Legend_Fleet'
+    database = 'Legend_Fleet'
     username = 'IsahIsah'
     password = 'isahisah'
 
@@ -543,6 +545,11 @@ def assembly_del_lines_with_scan_production_bom(del_lines, ord_nr):
     cnxn = get_db_connection()
     cursor = cnxn.cursor()
     for line in del_lines:
+        cursor.execute("SELECT I.PartCode FROM T_Inventory I INNER JOIN T_CustomFieldValue AS CV ON CV.LookUpValue = I.WarehouseCode INNER JOIN T_ProductionHeader PH ON PH.DossierCode = CV.IsahPrimKey AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2 INNER JOIN T_DossierMain DM ON PH.DossierCode = DM.DossierCode WHERE DM.OrdNr = ? AND I.CertificateCode = ? AND I.LotNr = ?", (ord_nr, line["certificate"], line["lotNr"]))
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute("EXEC SIP_ins_LEG_Inventory ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"]))
+            cnxn.commit()
         cursor.execute("SIP_ins_LEG_PartDispatch ?, ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"], line["Qty"]))
         cnxn.commit()
     cursor.close()
