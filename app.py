@@ -2,13 +2,23 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 import datetime
-import logging
+# import logging
 import pyodbc
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from ldap3 import Server, Connection, SIMPLE, SYNC, ALL, SUBTREE
 
-logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+app.config['JWT_SECRET_KEY'] = 'a@m!8r$eV$P5VXRd*7EF'
+jwt = JWTManager(app)
 CORS(app)
+
+AD_SERVER = '192.168.0.2'
+AD_DOMAIN = 'Users'
+AD_BASE_DN = 'OU=Users,OU=Legend Rubber,DC=LEGEND,DC=local'
+AD_USER = 'bruno.carrard@legendfleet.com'
+AD_PASSWORD = 'Summer2023!@#'
 
 def get_db_connection():
     server = 'LR-SQL01\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
@@ -22,7 +32,20 @@ def get_db_connection():
     cnxn = pyodbc.connect(f'DRIVER={{{driver_name}}};SERVER={server};DATABASE={database};UID={username};PWD={password}')
     return cnxn
 
+@app.route('/login')
+def login():
+    username = request.args.get('username', type=str)
+    password = request.args.get('password', type=str)
+    valid = verify_login(username, password)
+    if valid['authenticated']:
+        access_token = create_access_token(identity=username)
+        isah_user = get_isah_user(valid['windows_user'])
+        return jsonify(access_token=access_token, isah_user=isah_user)
+    else:
+        return jsonify({"error": valid['message']}), 400
+
 @app.route('/')
+@jwt_required()
 def data():
     user_input = request.args.get('value', type=str)  # Get user input from query parameter
 
@@ -52,6 +75,7 @@ def data():
     return jsonify(results)
 
 @app.route('/', methods=['POST'])
+@jwt_required()
 def handle_post():
     if request.is_json:
         data = request.get_json()
@@ -80,6 +104,36 @@ def handle_post():
     else:
         return jsonify({"error": "Request must be JSON"}), 400
     
+def verify_login(username, password):
+    server = Server(AD_SERVER, get_info=ALL)
+    conn = Connection(server, user=AD_USER, password=AD_PASSWORD, authentication=SIMPLE)
+    if not conn.bind():
+        return {'authenticated': False, 'message': 'Failed to connect to Active Directory'}
+    # Search for the user in Active Directory
+    conn.search(AD_BASE_DN, '(sAMAccountName={})'.format(username), SUBTREE,
+            attributes=['cn', 'mail'])
+    if len(conn.entries) != 1:
+        return {'authenticated': False, 'message': 'User not found'}
+    # Attempt to authenticate the user with the provided password
+    user_dn = conn.entries[0].entry_dn
+    user_mail = conn.entries[0].mail
+    conn = Connection(server, user=user_dn, password=password, authentication=SIMPLE)
+
+    if not conn.bind():
+        return({'authenticated': False, 'message': 'Invalid credentials'})
+    
+    return({'authenticated': True, 'message': 'Login successful', 'windows_user': user_mail})
+    
+def get_isah_user(windows_user):
+    print(windows_user)
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+    cursor.execute("SELECT UserCode FROM T_UserRegistration WHERE WindowsLogin = ?", (str(windows_user)))
+    isah_user = cursor.fetchone()[0].strip()
+    cursor.close()
+    cnxn.close()
+    print(isah_user)
+    return isah_user
 
 def verify_lotnr(lot_nrs):
     result = {
