@@ -4,13 +4,15 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import datetime
 # import logging
 import pyodbc
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, create_refresh_token
 from ldap3 import Server, Connection, SIMPLE, SYNC, ALL, SUBTREE
 
 # logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.config['JWT_SECRET_KEY'] = 'a@m!8r$eV$P5VXRd*7EF'
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(minutes=30)
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = datetime.timedelta(days=5)
 jwt = JWTManager(app)
 CORS(app)
 
@@ -38,11 +40,22 @@ def login():
     password = request.args.get('password', type=str)
     valid = verify_login(username, password)
     if valid['authenticated']:
+        isah_user_dic = get_isah_user(valid['windows_user'])
         access_token = create_access_token(identity=username)
-        isah_user = get_isah_user(valid['windows_user'])
-        return jsonify(access_token=access_token, isah_user=isah_user)
+        refresh_token = create_refresh_token(identity=username)
+        if not isah_user_dic['found']:
+            return jsonify({"error": isah_user_dic['message']}), 400
+        else:
+            return jsonify(access_token=access_token, refresh_token=refresh_token, isah_user=isah_user_dic['isah_user'])
     else:
         return jsonify({"error": valid['message']}), 400
+
+@app.route('/refresh')
+@jwt_required(refresh=True)
+def refresh():
+    current_user = get_jwt_identity()
+    new_access_token = create_access_token(identity=current_user)
+    return jsonify(access_token=new_access_token)
 
 @app.route('/')
 @jwt_required()
@@ -125,15 +138,24 @@ def verify_login(username, password):
     return({'authenticated': True, 'message': 'Login successful', 'windows_user': user_mail})
     
 def get_isah_user(windows_user):
+    response = {
+        'found': False,
+        'isah_user': '',
+        'message': ''
+    }
     print(windows_user)
     cnxn = get_db_connection()
     cursor = cnxn.cursor()
     cursor.execute("SELECT UserCode FROM T_UserRegistration WHERE WindowsLogin = ?", (str(windows_user)))
-    isah_user = cursor.fetchone()[0].strip()
+    result = cursor.fetchone()
+    if result is not None and len(result) > 0:
+        response['isah_user'] = result[0].strip()
+        response['found'] = True
+    else:
+        response['message'] = f'Your email {windows_user} is not linked to an ISAH User'
     cursor.close()
     cnxn.close()
-    print(isah_user)
-    return isah_user
+    return response
 
 def verify_lotnr(lot_nrs):
     result = {
