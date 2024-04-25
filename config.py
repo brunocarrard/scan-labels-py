@@ -6,7 +6,7 @@ class Config:
     AD_PASSWORD = 'Summer2023!@#'
 
     SERVER = 'LR-SQL01\MSSQLSERVER_ISAH'  # e.g., 'localhost\sqlexpress'
-    DATABASE = 'Legend_Fleet'
+    DATABASE = 'Homologation_Legend_Fleet'
     USERNAME = 'IsahIsah'
     PASSWORD = 'isahisah'
     DRIVER = 'SQL Server Native Client 11.0'

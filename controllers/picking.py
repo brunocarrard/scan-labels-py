@@ -114,7 +114,7 @@ class Picking:
 
         return(import_del_lines)
     
-    def assembly_del_lines_with_scan_production_bom(del_lines, ord_nr):
+    def assembly_del_lines_with_scan_production_bom(del_lines, ord_nr, isah_user):
         sum_dict = {}
         for line in del_lines:
             key = (line['PartCode'], line['lotNr'], line['certificate'])
@@ -128,7 +128,7 @@ class Picking:
             if row is None:
                 cursor.execute("EXEC SIP_ins_LEG_Inventory ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"]))
                 cnxn.commit()
-            cursor.execute("SIP_ins_LEG_PartDispatch ?, ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"], line["Qty"]))
+            cursor.execute("SIP_ins_LEG_PartDispatch ?, ?, ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"], line["Qty"], isah_user))
             cnxn.commit()
         cursor.close()
         cnxn.close()

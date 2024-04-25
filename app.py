@@ -28,8 +28,8 @@ def login():
     valid = Login.verify_login(username, password)
     if valid['authenticated']:
         isah_user_dic = Login.get_isah_user(valid['windows_user'])
-        access_token = create_access_token(identity=username)
-        refresh_token = create_refresh_token(identity=username)
+        access_token = create_access_token(isah_user_dic['isah_user'])
+        refresh_token = create_refresh_token(isah_user_dic['isah_user'])
         if not isah_user_dic['found']:
             return jsonify({"error": isah_user_dic['message']}), 400
         else:
@@ -75,6 +75,7 @@ def data():
 @app.route('/', methods=['POST'])
 @jwt_required()
 def handle_post():
+    isah_user = get_jwt_identity()
     if request.is_json:
         data = request.get_json()
         del_lines = data['delLines']
@@ -86,7 +87,7 @@ def handle_post():
             return jsonify({"error": f"LotNr {lotnrs} does not exists"}), 400
         if not certificate_result["valid"]:
             certificates = ", ".join(certificate_result["invalid_results"])
-            return jsonify({"error": f"Certiicate {certificates} does not exists"}), 400
+            return jsonify({"error": f"Certificate {certificates} does not exists"}), 400
         old_del_lines = Getters.get_del_lines(data['ordNr'])
         
         for line in old_del_lines:
@@ -94,7 +95,7 @@ def handle_post():
         import_del_lines = Picking.assembly_del_lines_with_scan_sales_parts([line for line in del_lines if line['SubPartInd'] == 0], old_del_lines)
 
         DeliveryLines.create_new_lines(import_del_lines)
-        Picking.assembly_del_lines_with_scan_production_bom([line for line in del_lines if line['SubPartInd'] == 1], data['ordNr'])
+        Picking.assembly_del_lines_with_scan_production_bom([line for line in del_lines if line['SubPartInd'] == 1], data['ordNr'], isah_user)
         DeliveryLines.authorize(import_del_lines)
         return ("Scans were imported.")
     else:
