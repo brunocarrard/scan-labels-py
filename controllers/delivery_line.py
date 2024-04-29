@@ -166,7 +166,7 @@ class DeliveryLines:
         DeliveryLines.update_created_lines(import_lines)
 
     def update_created_lines(import_lines):
-        cnxn = DatabaseConnection.vget_db_connection()
+        cnxn = DatabaseConnection.get_db_connection()
         cursor = cnxn.cursor()
         for line in import_lines:
             if line.get('IsCreated', False) is True and line.get("RemainingLine", False) is not True:
