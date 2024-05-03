@@ -114,6 +114,8 @@ class Picking:
 
         return(import_del_lines)
     
+
+
     def assembly_del_lines_with_scan_production_bom(del_lines, ord_nr, isah_user):
         print(isah_user)
         sum_dict = {}

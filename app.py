@@ -100,6 +100,22 @@ def handle_post():
         return ("Scans were imported.")
     else:
         return jsonify({"error": "Request must be JSON"}), 400
-    
+
+@app.route('/warehouses')
+@jwt_required()
+def warehouses():
+    warehouseList = Getters.get_warehouses()
+    return jsonify(warehouseList)
+
+@app.route('/stock/parts')
+@jwt_required()
+def inventory_parts():
+    warehouse = request.args.get('warehouse', type=str)  # Get user input from query parameter
+    if not warehouse:
+        return jsonify({"error": "Must select Warehouse"}), 400
+    partsList = Getters.get_inventory_parts(warehouse)
+    print(partsList)
+    return jsonify(partsList)
+
 if __name__ == '__main__':                                                                          
     app.run()

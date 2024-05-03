@@ -90,3 +90,41 @@ class Getters:
         cursor.close()
         cnxn.close()
         return available_certificates
+    
+    def get_warehouses():
+        cnxn = DatabaseConnection.get_db_connection()
+        cursor = cnxn.cursor()
+        cursor.execute("SELECT DISTINCT WarehouseCode FROM T_Warehouse WHERE WarehouseCode <> N''")
+        rows = cursor.fetchall()
+
+        columns = [column[0] for column in cursor.description]
+        results = []
+        for row in rows:
+            row_dict = dict(zip(columns, row))
+
+            # Strip whitespace from string values and format date values
+            for key, value in row_dict.items():
+                results.append(value.strip())
+
+        cursor.close()
+        cnxn.close()
+        return results
+    
+    def get_inventory_parts(warehouse):
+        cnxn = DatabaseConnection.get_db_connection()
+        cursor = cnxn.cursor()
+        cursor.execute("SELECT DISTINCT PartCode FROM T_Inventory WHERE WarehouseCode = ?", (warehouse))
+        rows = cursor.fetchall()
+
+        columns = [column[0] for column in cursor.description]
+        results = []
+        for row in rows:
+            row_dict = dict(zip(columns, row))
+
+            # Strip whitespace from string values and format date values
+            for key, value in row_dict.items():
+                results.append(value.strip())
+
+        cursor.close()
+        cnxn.close()
+        return results
