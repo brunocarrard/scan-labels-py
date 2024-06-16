@@ -1,10 +1,12 @@
 import datetime
 from controllers.db_connection import DatabaseConnection
+from collections import Counter, defaultdict
 
 class Picking:
     def build_picking_list(result):
         worked_data = {
             "ordNr": result[0]["OrdNr"],
+            "CustId": result[0]["CustId"],
             "parts": []
         }
 
@@ -40,6 +42,53 @@ class Picking:
         # remove from import_lines lines Parts that where ready or authorized
         import_del_lines = [item for item in import_del_lines if item.get("DelFiatInd") == 0]
         import_del_lines = [item for item in import_del_lines if int(item.get("Qty")) - int(item.get("DelQty")) - int(item.get("ToBeDelQty")) > 0]
+        # repeated parts handle
+        ready_repeated_parts_import_del_lines = []
+        part_code_counts = Counter(item["PartCode"] for item in import_del_lines if item.get("SubPartInd", 0) != 1)
+        print(part_code_counts)
+        repeated_part_codes = {code for code, count in part_code_counts.items() if count > 1}
+        repeated_parts_del_lines = [item for item in import_del_lines if item["PartCode"] in repeated_part_codes and item.get("SubPartInd", 0) != 1]
+        print(len(repeated_parts_del_lines))
+        if len(repeated_parts_del_lines) > 1:
+            import_del_lines = [item for item in import_del_lines if item not in repeated_parts_del_lines]
+            grouped_repeated_items = defaultdict(list)
+            for item in repeated_parts_del_lines:
+                grouped_repeated_items[item["PartCode"]].append(item)
+            for part_code, items in grouped_repeated_items.items():
+                equivalent_line = [line for line in del_lines if line["PartCode"] == part_code]
+                totalQty = 0
+                if len(equivalent_line) > 1:
+                    for line in equivalent_line:
+                        totalQty = totalQty + int(line["Qty"])
+                else:
+                    totalQty = int(equivalent_line[0]["Qty"])
+                for index, item in enumerate(items):
+                    print(totalQty)
+                    if totalQty >= int(item["Qty"]):
+                        effective_qty = int(item["Qty"])
+                        totalQty = totalQty - effective_qty
+                    elif totalQty < int(item["Qty"]) and not totalQty == 0:
+                        effective_qty = totalQty
+                        totalQty = 0
+                    elif totalQty == 0:
+                        break
+                    item["ToBeDelQty"] = int(item["ToBeDelQty"]) + effective_qty
+                    item["RemainingQty"] = int(item["Qty"]) - item["ToBeDelQty"]
+                    item["ToBeDelCertificateCode"] = equivalent_line[index].get("certificate", "")
+                    item["ToBeDelLotNr"] = equivalent_line[index].get("lotNr", "")
+                    item["Done"] = True
+                    if item["ToBeDelQty"] == item["Qty"]:
+                        item["Authorize"] = True
+                    else:
+                        item["Authorize"] = False
+                    equivalent_line[index]["Done"] = True
+                    if int(item["InvtQty"]) > 0:
+                        item["InvtQty"] = item["Qty"]
+                    if int(item["PurQty"]) > 0:
+                        item["PurQty"] = item["Qty"]
+                    if int(item["ProdQty"]) > 0:
+                        item["ProdQty"] = item["Qty"]
+                    ready_repeated_parts_import_del_lines.append(item) 
         # produce update import_lines
         for import_line in import_del_lines:
             for del_line in del_lines:
@@ -111,13 +160,13 @@ class Picking:
                 new_line["Authorize"] = False
                 new_line["RemainingLine"] = True
                 import_del_lines.append(new_line)
-
+        for line in ready_repeated_parts_import_del_lines:
+            import_del_lines.append(line)
         return(import_del_lines)
     
 
 
     def assembly_del_lines_with_scan_production_bom(del_lines, ord_nr, isah_user):
-        print(isah_user)
         sum_dict = {}
         for line in del_lines:
             key = (line['PartCode'], line['lotNr'], line['certificate'])
@@ -133,5 +182,38 @@ class Picking:
                 cnxn.commit()
             cursor.execute("SIP_ins_LEG_PartDispatch ?, ?, ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"], line["Qty"], isah_user))
             cnxn.commit()
+        cursor.close()
+        cnxn.close()
+
+    def VerifyAMZUSOrder(picking_list):
+        cnxn = DatabaseConnection.get_db_connection()
+        cursor = cnxn.cursor()
+        for part in picking_list["parts"]:
+            if part.get("SubPartInd") is not None:
+                cursor.execute("""
+                    SELECT SUM(PH.ReceiptQty) 'ReceiptQty'
+                    FROM DossierMain DM
+                    INNER JOIN DossierDetail DD ON DM.DossierCode = DD.DossierCode
+                    INNER JOIN ProdHeadDosDetLink PHDL ON PHDL.DossierCode = DD.DossierCode AND PHDL.DetailCode = DD.DetailCode AND PHDL.DetailSubCode = DD.DetailSubCode
+                    INNER JOIN LogProdReceiptProdHeader PH ON PHDL.ProdHeaderDossierCode = PH.ProdHeaderDossierCode
+                    WHERE DM.OrdNr = ? AND DD.PartCode = ?
+                """, (picking_list["ordNr"], part["PartCode"]))
+                result = cursor.fetchone()
+                receipt_qty_sum = result[0] if result[0] is not None else 0
+                if not receipt_qty_sum == part["Qty"]:
+                    return False
+            # else:
+            #     cursor.execute("""
+            #         SELECT SUM(PH.ReceiptQty) 'ReceiptQty'
+            #         FROM DossierMain DM
+            #         INNER JOIN DossierDetail DD ON DM.DossierCode = DD.DossierCode
+            #         INNER JOIN ProdHeadDosDetLink PHDL ON PHDL.DossierCode = DD.DossierCode AND PHDL.DetailCode = DD.DetailCode AND PHDL.DetailSubCode = DD.DetailSubCode
+            #         INNER JOIN LogProdReceiptProdHeader PH ON PHDL.ProdHeaderDossierCode = PH.ProdHeaderDossierCode
+            #         WHERE DM.OrdNr = ? AND DD.PartCode = ?
+            #     """, (picking_list["ordNr"], part["PartCode"]))
+            #     result = cursor.fetchone()
+            #     receipt_qty_sum = result[0] if result[0] is not None else 0
+            #     if not receipt_qty_sum == part["Qty"]:
+            #         return False
         cursor.close()
         cnxn.close()

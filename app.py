@@ -62,14 +62,16 @@ def data():
     if len(results["parts"]) == 0:
         return jsonify({"error": "Order is ready and authorized"}), 404
     sub_parts = Getters.get_sub_parts(user_input)
-    results["parts"] = results["parts"] + sub_parts
+    if sub_parts is not None:
+        results["parts"] = results["parts"] + sub_parts
     certificates_lookup = Getters.get_available_certificates(user_input)
 
     for part in results["parts"]:
         part_code = part["PartCode"]
         if part_code in certificates_lookup:
             part["available_certificates"] = certificates_lookup[part_code]
-
+    # if results["CustId"] == "AMZUS":
+    #     Picking.VerifyAMZUSOrder(results)
     return jsonify(results)
 
 @app.route('/', methods=['POST'])
@@ -92,6 +94,7 @@ def handle_post():
         
         for line in old_del_lines:
             line['PartCode'] = line['PartCode'].strip()
+        print(del_lines)
         import_del_lines = Picking.assembly_del_lines_with_scan_sales_parts([line for line in del_lines if line['SubPartInd'] == 0], old_del_lines)
 
         DeliveryLines.create_new_lines(import_del_lines)

@@ -1,28 +1,42 @@
 from controllers.db_connection import DatabaseConnection
+import pyodbc
 
 class Getters:
     def get_sub_parts(ord_nr):
-        cnxn = DatabaseConnection.get_db_connection()
-        cursor = cnxn.cursor()
-        cursor.execute("EXEC SIP_sel_LEG_StockMovementsBOM ?", (ord_nr))
-        rows = cursor.fetchall()
-
-        columns = [column[0] for column in cursor.description]
-        results = []
-        for row in rows:
-            row_dict = dict(zip(columns, row))
-
-            # Strip whitespace from string values and format date values
-            for key, value in row_dict.items():
-                if isinstance(value, str):
-                    # Strip whitespace from string values
-                    row_dict[key] = value.strip()
-
-            results.append(row_dict)
-
-        cursor.close()
-        cnxn.close()
-        return results
+        try:
+            cnxn = DatabaseConnection.get_db_connection()
+            cursor = cnxn.cursor()
+            
+            # Execute the stored procedure with a parameter
+            cursor.execute("EXEC SIP_sel_LEG_StockMovementsBOM ?", ord_nr)
+            
+            # Fetch all rows
+            rows = cursor.fetchall()
+            
+            # Get column names from the cursor description
+            columns = [column[0] for column in cursor.description]
+            
+            # Process each row into a dictionary
+            results = []
+            for row in rows:
+                row_dict = dict(zip(columns, row))
+                # Strip whitespace from string values
+                for key, value in row_dict.items():
+                    if isinstance(value, str):
+                        row_dict[key] = value.strip()
+                results.append(row_dict)
+            
+            # Return results as JSON
+            return results
+    
+        except pyodbc.Error as e:
+            # Handle any database errors
+            return
+        
+        finally:
+            # Ensure the cursor and connection are closed
+            cursor.close()
+            cnxn.close()
     
     def get_del_lines(ord_nr):
         cnxn = DatabaseConnection.get_db_connection()
@@ -80,6 +94,7 @@ class Getters:
             qty = row[1]
             certificate = row[2]
             lot_nr = row[3]
+            print(available_certificates)
             found_certificate = next((obj for obj in available_certificates[part_code.strip()] if obj["code"] == lot_nr), None)
             if found_certificate:
                 found_certificate["qty"] = int(found_certificate["qty"]) - int(qty)
