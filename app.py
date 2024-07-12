@@ -97,8 +97,8 @@ def handle_post():
         print(del_lines)
         import_del_lines = Picking.assembly_del_lines_with_scan_sales_parts([line for line in del_lines if line['SubPartInd'] == 0], old_del_lines)
 
-        DeliveryLines.create_new_lines(import_del_lines)
         Picking.assembly_del_lines_with_scan_production_bom([line for line in del_lines if line['SubPartInd'] == 1], data['ordNr'], isah_user)
+        DeliveryLines.create_new_lines(import_del_lines)
         DeliveryLines.authorize(import_del_lines)
         return ("Scans were imported.")
     else:

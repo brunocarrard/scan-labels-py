@@ -1,6 +1,7 @@
 import datetime
 from controllers.db_connection import DatabaseConnection
 from collections import Counter, defaultdict
+from flask import abort
 
 class Picking:
     def build_picking_list(result):
@@ -174,10 +175,24 @@ class Picking:
         del_lines = [{"PartCode": key[0], "lotNr": key[1], "certificate": key[2], "Qty": qty} for key, qty in sum_dict.items()]
         cnxn = DatabaseConnection.get_db_connection()
         cursor = cnxn.cursor()
+        # verify if there is no stock line beign count.
         for line in del_lines:
-            cursor.execute("SELECT I.PartCode FROM T_Inventory I INNER JOIN T_CustomFieldValue AS CV ON CV.LookUpValue = I.WarehouseCode INNER JOIN T_ProductionHeader PH ON PH.DossierCode = CV.IsahPrimKey AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2 INNER JOIN T_DossierMain DM ON PH.DossierCode = DM.DossierCode WHERE DM.OrdNr = ? AND I.CertificateCode = ? AND I.LotNr = ?", (ord_nr, line["certificate"], line["lotNr"]))
-            row = cursor.fetchone()
-            if row is None:
+            cursor.execute("SELECT I.CycleCountInd FROM T_Inventory I INNER JOIN T_CustomFieldValue AS CV ON CV.LookUpValue = I.WarehouseCode INNER JOIN T_ProductionHeader PH ON PH.DossierCode = CV.IsahPrimKey AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2 INNER JOIN T_DossierMain DM ON PH.DossierCode = DM.DossierCode WHERE DM.OrdNr = ? AND I.CertificateCode = ? AND I.LotNr = ?  AND I.PartCode = ?", (ord_nr, line["certificate"], line["lotNr"], line["PartCode"]))
+            rows = cursor.fetchall()
+            found_one = False
+            found_zero = False
+            for row in rows:
+                if row[0]:
+                    found_one = True
+                else:
+                    found_zero = True
+            if found_one and not found_zero:
+                abort(400, description=f"Part {line["PartCode"]} is on stock count, try again later.")
+
+        for line in del_lines:
+            cursor.execute("SELECT I.CycleCountInd FROM T_Inventory I INNER JOIN T_CustomFieldValue AS CV ON CV.LookUpValue = I.WarehouseCode INNER JOIN T_ProductionHeader PH ON PH.DossierCode = CV.IsahPrimKey AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2 INNER JOIN T_DossierMain DM ON PH.DossierCode = DM.DossierCode WHERE DM.OrdNr = ? AND I.CertificateCode = ? AND I.LotNr = ?  AND I.PartCode = ?", (ord_nr, line["certificate"], line["lotNr"], line["PartCode"]))
+            rows = cursor.fetchall()
+            if not rows:
                 cursor.execute("EXEC SIP_ins_LEG_Inventory ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"]))
                 cnxn.commit()
             cursor.execute("SIP_ins_LEG_PartDispatch ?, ?, ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"], line["Qty"], isah_user))
