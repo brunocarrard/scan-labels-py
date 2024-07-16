@@ -170,9 +170,9 @@ class Picking:
     def assembly_del_lines_with_scan_production_bom(del_lines, ord_nr, isah_user):
         sum_dict = {}
         for line in del_lines:
-            key = (line['PartCode'], line['lotNr'], line['certificate'])
+            key = (line['PartCode'], line['lotNr'], line['certificate'], line['ParentPart'])
             sum_dict[key] = sum_dict.get(key, 0) + int(line['Qty'])
-        del_lines = [{"PartCode": key[0], "lotNr": key[1], "certificate": key[2], "Qty": qty} for key, qty in sum_dict.items()]
+        del_lines = [{"PartCode": key[0], "lotNr": key[1], "certificate": key[2], "ParentPart": key[3], "Qty": qty} for key, qty in sum_dict.items()]
         cnxn = DatabaseConnection.get_db_connection()
         cursor = cnxn.cursor()
         # verify if there is no stock line beign count.
@@ -190,12 +190,28 @@ class Picking:
                 abort(400, description=f"Part {line["PartCode"]} is on stock count, try again later.")
 
         for line in del_lines:
-            cursor.execute("SELECT I.CycleCountInd FROM T_Inventory I INNER JOIN T_CustomFieldValue AS CV ON CV.LookUpValue = I.WarehouseCode INNER JOIN T_ProductionHeader PH ON PH.DossierCode = CV.IsahPrimKey AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2 INNER JOIN T_DossierMain DM ON PH.DossierCode = DM.DossierCode WHERE DM.OrdNr = ? AND I.CertificateCode = ? AND I.LotNr = ?  AND I.PartCode = ?", (ord_nr, line["certificate"], line["lotNr"], line["PartCode"]))
-            rows = cursor.fetchall()
-            if not rows:
-                cursor.execute("EXEC SIP_ins_LEG_Inventory ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"]))
-                cnxn.commit()
-            cursor.execute("SIP_ins_LEG_PartDispatch ?, ?, ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"], line["Qty"], isah_user))
+            cursor.execute("""
+                        SELECT  CASE
+                                    WHEN BOM.InvtQty > 0 THEN 1
+                                    WHEN BOM.ProdQty > 0 THEN 3
+                                    WHEN BOM.PurQty > 0 THEN 1
+                                END 'type'
+                        FROM T_DossierMain DM
+                        INNER JOIN T_DossierDetail DD ON DD.DossierCode = DM.DossierCode
+                        INNER JOIN ProdHeadDosDetLink PHDL ON DD.DossierCode = PHDL.DossierCode AND DD.DetailCode = PHDL.DetailCode AND DD.DetailSubCode = PHDL.DetailSubCode
+                        INNER JOIN T_ProductionHeader PH ON PH.ProdHeaderDossierCode = PHDL.ProdHeaderDossierCode
+                        INNER JOIN T_ProdBillOfMat BOM ON PHDL.ProdHeaderDossierCode = BOM.ProdHeaderDossierCode
+                        WHERE DM.OrdNr = ? AND DD.PartCode = ? AND BOM.SubPartCode = ?
+                           """, (ord_nr, line["ParentPart"], line["PartCode"]))
+            row = cursor.fetchone()
+            type = row[0]
+            if type == 1:
+                cursor.execute("SELECT I.CycleCountInd FROM T_Inventory I INNER JOIN T_CustomFieldValue AS CV ON CV.LookUpValue = I.WarehouseCode INNER JOIN T_ProductionHeader PH ON PH.DossierCode = CV.IsahPrimKey AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2 INNER JOIN T_DossierMain DM ON PH.DossierCode = DM.DossierCode WHERE DM.OrdNr = ? AND I.CertificateCode = ? AND I.LotNr = ?  AND I.PartCode = ?", (ord_nr, line["certificate"], line["lotNr"], line["PartCode"]))
+                rows = cursor.fetchall()
+                if not rows:
+                    cursor.execute("EXEC SIP_ins_LEG_Inventory ?, ?, ?, ?", (ord_nr, line["PartCode"], line["certificate"], line["lotNr"]))
+                    cnxn.commit()
+            cursor.execute("SIP_ins_LEG_PartDispatch ?, ?, ?, ?, ?, ?, ?", (ord_nr, line["PartCode"], line["ParentPart"], line["certificate"], line["lotNr"], line["Qty"], isah_user))
             cnxn.commit()
         cursor.close()
         cnxn.close()
