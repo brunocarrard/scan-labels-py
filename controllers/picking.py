@@ -46,10 +46,8 @@ class Picking:
         # repeated parts handle
         ready_repeated_parts_import_del_lines = []
         part_code_counts = Counter(item["PartCode"] for item in import_del_lines if item.get("SubPartInd", 0) != 1)
-        print(part_code_counts)
         repeated_part_codes = {code for code, count in part_code_counts.items() if count > 1}
         repeated_parts_del_lines = [item for item in import_del_lines if item["PartCode"] in repeated_part_codes and item.get("SubPartInd", 0) != 1]
-        print(len(repeated_parts_del_lines))
         if len(repeated_parts_del_lines) > 1:
             import_del_lines = [item for item in import_del_lines if item not in repeated_parts_del_lines]
             grouped_repeated_items = defaultdict(list)
@@ -64,7 +62,6 @@ class Picking:
                 else:
                     totalQty = int(equivalent_line[0]["Qty"])
                 for index, item in enumerate(items):
-                    print(totalQty)
                     if totalQty >= int(item["Qty"]):
                         effective_qty = int(item["Qty"])
                         totalQty = totalQty - effective_qty
@@ -167,7 +164,7 @@ class Picking:
     
 
 
-    def assembly_del_lines_with_scan_production_bom(del_lines, ord_nr, isah_user):
+    def create_scanned_issue(del_lines, ord_nr, isah_user):
         sum_dict = {}
         for line in del_lines:
             key = (line['PartCode'], line['lotNr'], line['certificate'], line['ParentPart'])

@@ -94,7 +94,6 @@ class Getters:
             qty = row[1]
             certificate = row[2]
             lot_nr = row[3]
-            print(available_certificates)
             found_certificate = next((obj for obj in available_certificates[part_code.strip()] if obj["code"] == lot_nr), None)
             if found_certificate:
                 found_certificate["qty"] = int(found_certificate["qty"]) - int(qty)
