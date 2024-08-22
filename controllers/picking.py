@@ -72,14 +72,25 @@ class Picking:
                         break
                     item["ToBeDelQty"] = int(item["ToBeDelQty"]) + effective_qty
                     item["RemainingQty"] = int(item["Qty"]) - item["ToBeDelQty"]
-                    item["ToBeDelCertificateCode"] = equivalent_line[index].get("certificate", "")
-                    item["ToBeDelLotNr"] = equivalent_line[index].get("lotNr", "")
+                    # item["ToBeDelCertificateCode"] = equivalent_line[index].get("certificate", "")
+                    # item["ToBeDelLotNr"] = equivalent_line[index].get("lotNr", "")
+                    if len(equivalent_line) > 1:
+                        item["ToBeDelCertificateCode"] = equivalent_line[index].get("certificate", "")
+                    elif len(equivalent_line) == 1:
+                        item["ToBeDelCertificateCode"] = equivalent_line[0].get("certificate", "")
+                    if len(equivalent_line) > 1:
+                        item["ToBeDelLotNr"] = equivalent_line[index].get("lotNr", "")
+                    elif len(equivalent_line) == 1:
+                        item["ToBeDelLotNr"] = equivalent_line[0].get("lotNr", "")
                     item["Done"] = True
                     if item["ToBeDelQty"] == item["Qty"]:
                         item["Authorize"] = True
                     else:
                         item["Authorize"] = False
-                    equivalent_line[index]["Done"] = True
+                    if len(equivalent_line) > 1:
+                        equivalent_line[index]["Done"] = True
+                    elif len(equivalent_line) == 1:
+                        equivalent_line[0]["Done"] = True
                     if int(item["InvtQty"]) > 0:
                         item["InvtQty"] = item["Qty"]
                     if int(item["PurQty"]) > 0:
