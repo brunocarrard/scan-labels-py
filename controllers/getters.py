@@ -1,7 +1,57 @@
 from controllers.db_connection import DatabaseConnection
+from datetime import datetime
 import pyodbc
 
 class Getters:
+    def get_available_orders():
+        try:
+            cnxn = DatabaseConnection.get_db_connection()
+            cursor = cnxn.cursor()
+            
+            # Execute the stored procedure with a parameter
+            cursor.execute("""
+                SELECT DISTINCT OrdNr, CustId, ISNULL(DesiredDelDate, ''), DesiredDelDate
+                FROM SV_LEG_IncompleteShipmentLines
+                WHERE OrdType <> '20' AND OrdType <> '25' AND OrdType <> '15'
+                    AND (IsReady = 'Production Ready' OR IsReady = 'Part Available')
+                    AND Status <> 'Invoiced'
+                ORDER BY DesiredDelDate
+            """)
+            # Fetch all rows
+            rows = cursor.fetchall()
+            results = []
+            # Get column names from the cursor description
+            for row in rows:
+                print(row)
+                date_value = row[2]
+                formatted_date = None
+                if date_value:  # Ensure date_value is not None
+                    if isinstance(date_value, datetime):
+                        # If already a datetime object, just format it
+                        formatted_date = date_value.strftime('%Y-%m-%d')
+                    elif isinstance(date_value, str):
+                        # If it's a string, convert it to a datetime object, then format
+                        date_value = datetime.strptime(date_value, '%Y-%m-%d')
+                        formatted_date = date_value.strftime('%Y-%m-%d')
+                results.append({
+                    "id": row[0].strip(),
+                    "custId": row[1].strip(),
+                    "date": formatted_date
+                })
+            
+            # Return results as JSON
+            return results
+    
+        except pyodbc.Error as e:
+            # Handle any database errors
+            return
+        
+        finally:
+            # Ensure the cursor and connection are closed
+            cursor.close()
+            cnxn.close()
+
+
     def get_sub_parts(ord_nr):
         try:
             cnxn = DatabaseConnection.get_db_connection()

@@ -118,5 +118,11 @@ def inventory_parts():
     partsList = Getters.get_inventory_parts(warehouse)
     return jsonify(partsList)
 
+@app.route('/sales-orders')
+@jwt_required()
+def get_available_orders():
+    orders = Getters.get_available_orders()
+    return jsonify(orders)
+
 if __name__ == '__main__':                                                                          
     app.run()
