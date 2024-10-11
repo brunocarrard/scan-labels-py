@@ -66,7 +66,7 @@ class DeliveryLines:
                         line["LocationCode"],
                         line["LotNr"],
                         line["CertificateCode"],
-                        '',
+                        line["WarehouseCode"],
                         '',
                         line["ToBeDelLotNr"],
                         line["ToBeDelCertificateCode"],
