@@ -2,7 +2,7 @@ from controllers.db_connection import DatabaseConnection
 import datetime
 
 class DeliveryLines:
-    def create_new_lines(import_lines):
+    def create_new_lines(import_lines, warehouse_code):
         cnxn = DatabaseConnection.get_db_connection()
         cursor = cnxn.cursor()
         # for line in import_lines:
@@ -64,12 +64,12 @@ class DeliveryLines:
                         line["Info"],
                         line["WarehouseCode"],
                         line["LocationCode"],
-                        line["LotNr"],
-                        line["CertificateCode"],
-                        line["WarehouseCode"],
                         '',
-                        line["ToBeDelLotNr"],
-                        line["ToBeDelCertificateCode"],
+                        '',
+                        warehouse_code,
+                        '',
+                        '',
+                        '',
                         line["InventoryStatusCode"],
                         line["ToBeDelInventoryStatusCode"],
                         line["InvtCreDate"],
@@ -131,8 +131,8 @@ class DeliveryLines:
                     line.get("Info"),
                     line.get("WarehouseCode"),
                     line.get("LocationCode"),
-                    line.get("LotNr"),
-                    line.get("CertificateCode"),
+                    '',
+                    '',
                     line.get("InventoryStatusCode"),
                     line.get("InvtCreDate"),
                     line.get("ToBeDelCompletedDosDetInd"),
@@ -163,7 +163,7 @@ class DeliveryLines:
                 line['IsCreated'] = True
         cursor.close()
         cnxn.close()
-        DeliveryLines.update_created_lines(import_lines)
+        # DeliveryLines.update_created_lines(import_lines)
 
     def update_created_lines(import_lines):
         cnxn = DatabaseConnection.get_db_connection()

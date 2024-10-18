@@ -63,15 +63,21 @@ def data():
         return jsonify({"error": "Order is ready and authorized"}), 404
     sub_parts = Getters.get_sub_parts(user_input)
     if sub_parts is not None:
+        for sub_part in sub_parts:
+            print (sub_part)
+            parent_part = [item for item in results["parts"] if item["PartCode"].strip() == sub_part["ParentPart"]]
+            if parent_part[0]["Count"] > 1:
+                sub_part["Qty"] = sub_part["Qty"] * parent_part[0]["Count"]
         results["parts"] = results["parts"] + sub_parts
-    certificates_lookup = Getters.get_available_certificates(user_input)
+    # certificates_lookup = Getters.get_available_certificates(user_input)
 
-    for part in results["parts"]:
-        part_code = part["PartCode"]
-        if part_code in certificates_lookup:
-            part["available_certificates"] = certificates_lookup[part_code]
-    # if results["CustId"] == "AMZUS":
-    #     Picking.VerifyAMZUSOrder(results)
+    # for part in results["parts"]:
+    #     part_code = part["PartCode"]
+    #     if part_code in certificates_lookup:
+    #         part["available_certificates"] = certificates_lookup[part_code]
+    #         if part["Count"] > 1:
+    #             for certificate in part["available_certificates"]:
+    #                 certificate["qty"] = certificate["qty"] * part["Count"]
     return jsonify(results)
 
 @app.route('/', methods=['POST'])
@@ -82,22 +88,22 @@ def handle_post():
         data = request.get_json()
         del_lines = data['delLines']
         del_lines = Verification.verify_v1(del_lines)
-        lotnr_result = Verification.verify_lotnr(del_line["lotNr"] for del_line in del_lines)
-        certificate_result = Verification.verify_certificate(del_line["certificate"] for del_line in del_lines)
-        if not lotnr_result["valid"]:
-            lotnrs = ", ".join(lotnr_result["invalid_results"])
-            return jsonify({"error": f"LotNr {lotnrs} does not exists"}), 400
-        if not certificate_result["valid"]:
-            certificates = ", ".join(certificate_result["invalid_results"])
-            return jsonify({"error": f"Certificate {certificates} does not exists"}), 400
+        # lotnr_result = Verification.verify_lotnr(del_line["lotNr"] for del_line in del_lines)
+        # certificate_result = Verification.verify_certificate(del_line["certificate"] for del_line in del_lines)
+        # if not lotnr_result["valid"]:
+        #     lotnrs = ", ".join(lotnr_result["invalid_results"])
+        #     return jsonify({"error": f"LotNr {lotnrs} does not exists"}), 400
+        # if not certificate_result["valid"]:
+        #     certificates = ", ".join(certificate_result["invalid_results"])
+        #     return jsonify({"error": f"Certificate {certificates} does not exists"}), 400
         old_del_lines = Getters.get_del_lines(data['ordNr'])
-        
+        warehouse_code = Getters.get_warehouse_code(data['ordNr'])
         for line in old_del_lines:
             line['PartCode'] = line['PartCode'].strip()
         import_del_lines = Picking.assembly_del_lines_with_scan_sales_parts([line for line in del_lines if line['SubPartInd'] == 0], old_del_lines)
 
         Picking.create_scanned_issue([line for line in del_lines if line['SubPartInd'] == 1], data['ordNr'], isah_user)
-        DeliveryLines.create_new_lines(import_del_lines)
+        DeliveryLines.create_new_lines(import_del_lines, warehouse_code)
         DeliveryLines.authorize(import_del_lines)
         return ("Scans were imported.")
     else:
