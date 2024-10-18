@@ -16,23 +16,26 @@ class Picking:
         for item in result:
             part_code = item["PartCode"].strip()
             qty = item["Qty"] - item["ToBeDelQty"] - item["DelQty"]
+            
 
             if part_code not in grouped_by_part_code:
-                grouped_by_part_code[part_code] = qty
+                grouped_by_part_code[part_code] = {"total_qty": qty, "count": 1}
             else:
-                grouped_by_part_code[part_code] += qty
+                grouped_by_part_code[part_code]["total_qty"] += qty
+                grouped_by_part_code[part_code]["count"] += 1
 
-        worked_data["parts"] = [{"PartCode": key, "Qty": value} for key, value in grouped_by_part_code.items()]
+
+        worked_data["parts"] = [{"PartCode": key, "Qty": value["total_qty"], "Count": value["count"]} for key, value in grouped_by_part_code.items()]
 
         worked_data["parts"] = [item for item in worked_data["parts"] if item.get("Qty") is not None and item.get("Qty") > 0]
-
+        print(worked_data)
         return worked_data
     
     def assembly_del_lines_with_scan_sales_parts(del_lines, old_del_lines):
         # assembly similar del_lines
         sum_dict = {}
         for line in del_lines:
-            key = (line['PartCode'], line['lotNr'], line['certificate'])
+            key = (line['partCode'], line['lotNr'], line['certificate'])
             sum_dict[key] = sum_dict.get(key, 0) + int(line['Qty'])
         del_lines = [{"PartCode": key[0], "lotNr": key[1], "certificate": key[2], "Qty": qty} for key, qty in sum_dict.items()]
         # set initial import_lines
@@ -72,7 +75,7 @@ class Picking:
                         break
                     item["ToBeDelQty"] = int(item["ToBeDelQty"]) + effective_qty
                     item["RemainingQty"] = int(item["Qty"]) - item["ToBeDelQty"]
-                    # item["ToBeDelCertificateCode"] = equivalent_line[index].get("certificate", "")
+                    # it    em["ToBeDelCertificateCode"] = equivalent_line[index].get("certificate", "")
                     # item["ToBeDelLotNr"] = equivalent_line[index].get("lotNr", "")
                     if len(equivalent_line) > 1:
                         item["ToBeDelCertificateCode"] = equivalent_line[index].get("certificate", "")
@@ -185,7 +188,13 @@ class Picking:
         cursor = cnxn.cursor()
         # verify if there is no stock line beign count.
         for line in del_lines:
-            cursor.execute("SELECT I.CycleCountInd FROM T_Inventory I INNER JOIN T_CustomFieldValue AS CV ON CV.LookUpValue = I.WarehouseCode INNER JOIN T_ProductionHeader PH ON PH.DossierCode = CV.IsahPrimKey AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2 INNER JOIN T_DossierMain DM ON PH.DossierCode = DM.DossierCode WHERE DM.OrdNr = ? AND I.CertificateCode = ? AND I.LotNr = ?  AND I.PartCode = ?", (ord_nr, line["certificate"], line["lotNr"], line["PartCode"]))
+            cursor.execute("""
+                SELECT I.CycleCountInd
+                FROM T_DossierMain DM
+                LEFT JOIN T_CustomFieldValue AS CV ON CV.IsahPrimKey = DM.DossierCode AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2
+                LEFT JOIN T_Inventory I ON CV.LookUpValue = I.WarehouseCode
+                WHERE DM.OrdNr = ? AND I.CertificateCode = ? AND I.LotNr = ?  AND I.PartCode = ?
+            """, (ord_nr, line["certificate"], line["lotNr"], line["PartCode"]))
             rows = cursor.fetchall()
             found_one = False
             found_zero = False
