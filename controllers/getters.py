@@ -14,8 +14,9 @@ class Getters:
                 FROM SV_LEG_IncompleteShipmentLines
                 WHERE OrdType <> '20' AND OrdType <> '25' AND OrdType <> '15'
                     AND (IsReady = 'Production Ready' OR IsReady = 'Part Available')
+                         --WHERE  (IsReady = 'Production Ready' OR IsReady = 'Part Available')
                     AND Status <> 'Invoiced'
-                ORDER BY DesiredDelDate
+                ORDER BY DesiredDelDat
             """)
             # Fetch all rows
             rows = cursor.fetchall()
@@ -112,6 +113,16 @@ class Getters:
         cnxn.close()
         return results
     
+    def get_warehouse_code(ord_nr):
+        cnxn = DatabaseConnection.get_db_connection()
+        cursor = cnxn.cursor()
+        cursor.execute("SELECT LookUpValue FROM T_DossierMain DM LEFT JOIN T_CustomFieldValue AS CV ON CV.IsahPrimKey = DM.DossierCode AND CV.FieldDefCode = 'WAREHOUSE' AND CV.IsahTableId = 2 WHERE DM.OrdNr = ?", (ord_nr))
+        rows = cursor.fetchall()
+        warehouse_code = rows[0][0].strip()
+        if warehouse_code is None:
+            warehouse_code = 'MAIN'
+        return warehouse_code
+
     def get_available_certificates(ord_nr):
         cnxn = DatabaseConnection.get_db_connection()
         cursor = cnxn.cursor()
@@ -153,6 +164,7 @@ class Getters:
                     found_certificate["qty"] = int(found_certificate["qty"]) - int(qty)
         cursor.close()
         cnxn.close()
+        print(available_certificates)
         return available_certificates
     
     def get_warehouses():
