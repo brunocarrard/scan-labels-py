@@ -4,16 +4,18 @@ class Verification:
     def verify_v1(del_lines):
         new_del_lines = []
         for line in del_lines:
+            line['lotNr'] = ""
+            line['certificate'] = ""
             line['PartCode'] = line['partCode']
             line['Qty'] = line['qty']
-            if (line['lotNr'].startswith("LF") or line['lotNr'].startswith("LEG")):
-                line['certificate'] = ""
-            else:
-                if (line['lotNr']) == "":
-                    line['certificate'] = ""
-                else:
-                    line['certificate'] = line['lotNr']
-                line['lotNr'] = ""
+        #     if (line['lotNr'].startswith("LF") or line['lotNr'].startswith("LEG")):
+        #         line['certificate'] = ""
+        #     else:
+        #         if (line['lotNr']) == "":
+        #             line['certificate'] = ""
+        #         else:
+        #             line['certificate'] = line['lotNr']
+        #         line['lotNr'] = ""
             new_del_lines.append(line)
         return (new_del_lines)
     
