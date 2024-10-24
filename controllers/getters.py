@@ -10,14 +10,21 @@ class Getters:
             
             # Execute the stored procedure with a parameter
             cursor.execute("""
-                SELECT DISTINCT OrdNr, CustId, ISNULL(DesiredDelDate, ''), DesiredDelDate
+                SELECT DISTINCT OrdNr, CustId, PackingDate
                 FROM SV_LEG_IncompleteShipmentLines
                 WHERE OrdType <> '20' AND OrdType <> '25' AND OrdType <> '15'
                     AND (IsReady = 'Production Ready' OR IsReady = 'Part Available')
-                         --WHERE  (IsReady = 'Production Ready' OR IsReady = 'Part Available')
                     AND Status <> 'Invoiced'
-                ORDER BY DesiredDelDat
             """)
+            # cursor.execute("""
+            #     SELECT DISTINCT OrdNr, CustId, ISNULL(DesiredDelDate, ''), DesiredDelDate
+            #     FROM SV_LEG_IncompleteShipmentLines
+            #     WHERE OrdType <> '20' AND OrdType <> '25' AND OrdType <> '15'
+            #         AND (IsReady = 'Production Ready' OR IsReady = 'Part Available')
+            #              --WHERE  (IsReady = 'Production Ready' OR IsReady = 'Part Available')
+            #         AND Status <> 'Invoiced'
+            #     ORDER BY DesiredDelDat
+            # """)
             # Fetch all rows
             rows = cursor.fetchall()
             results = []
