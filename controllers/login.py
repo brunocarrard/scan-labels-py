@@ -11,11 +11,12 @@ class Login:
         # Search for the user in Active Directory
         conn.search(Config.AD_BASE_DN, '(sAMAccountName={})'.format(username), SUBTREE,
                 attributes=['cn', 'mail'])
-        if len(conn.entries) != 1:
+        if len(conn.entries) < 1:
             return {'authenticated': False, 'message': 'User not found'}
         # Attempt to authenticate the user with the provided password
         user_dn = conn.entries[0].entry_dn
         user_mail = conn.entries[0].mail
+        print(conn.entries)
         conn = Connection(server, user=user_dn, password=password, authentication=SIMPLE)
 
         if not conn.bind():
@@ -24,6 +25,7 @@ class Login:
         return({'authenticated': True, 'message': 'Login successful', 'windows_user': user_mail})
     
     def get_isah_user(windows_user):
+        print(str(windows_user))
         response = {
             'found': False,
             'isah_user': '',
